@@ -1,26 +1,41 @@
 import os
 import tkinter as tk
-from tkinter import colorchooser, filedialog, simpledialog
+from tkinter import (
+    colorchooser,
+    filedialog,
+    simpledialog,
+)
 import matplotlib.pyplot as plt
-from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
-from utils.dataset import Dataset, DataManager
+from matplotlib.backends.backend_tkagg import (
+    FigureCanvasTkAgg,
+    NavigationToolbar2Tk,
+)
+from utils.dataset import (
+    Dataset,
+    DataManager,
+)
 
 
 class ParamsFrame(tk.Frame):
     def __init__(self, parent):
         super().__init__(parent, border=2, relief=tk.GROOVE)
-        # TODO: Replace with <simpledialog> methods
         tk.Label(self, text="k-shift: ").grid(row=0, column=0, padx=5, pady=5, sticky='e')
         self.k_shift_value = tk.DoubleVar(value=0.0)
-        tk.Entry(self, width=15, textvariable=self.k_shift_value).grid(row=0, column=1, padx=5, pady=5)
+        self.kshift = tk.Entry(self, width=7, textvariable=self.k_shift_value, state=tk.DISABLED,
+                               disabledbackground='white', disabledforeground='black')
+        self.kshift.grid(row=0, column=1, padx=5, pady=5)
+        self.kshift.bind('<Double-Button-1>', self.set_k_shift)
 
         # first row
-        tk.Label(self, text="Amp.: ").grid(row=0, column=2, padx=5, pady=5, sticky='e')
+        tk.Label(self, text="Mag.: ").grid(row=0, column=2, padx=5, pady=5, sticky='e')
         self.s02 = tk.DoubleVar(value=0.81)
-        tk.Entry(self, width=15, textvariable=self.s02).grid(row=0, column=3, padx=5, pady=5)
+        self.mag = tk.Entry(self, width=7, textvariable=self.s02, state=tk.DISABLED,
+                            disabledbackground='white', disabledforeground='black')
+        self.mag.grid(row=0, column=3, padx=5, pady=5)
+        self.mag.bind('<Double-Button-1>', self.set_magnitude)
 
         # Create window function selector
-        tk.Label(self, text="Window function:").grid(row=0, column=4, padx=5, pady=5)
+        tk.Label(self, text="Window:").grid(row=0, column=4, padx=5, pady=5)
         self.wind = tk.StringVar(self)
         choices = ('kaiser', 'bartlett', 'blackman', 'hamming', 'hanning')
         self.wind.set(choices[0])  # set the default option
@@ -31,15 +46,51 @@ class ParamsFrame(tk.Frame):
         # second row:
         tk.Label(self, text="k min: ").grid(row=1, column=0, padx=5, pady=5, sticky='e')
         self.k_min = tk.DoubleVar(value=3.5)
-        tk.Entry(self, width=15, textvariable=self.k_min).grid(row=1, column=1, padx=5, pady=5)
+        self.kmin = tk.Entry(self, width=7, textvariable=self.k_min, state=tk.DISABLED,
+                             disabledbackground='white', disabledforeground='black')
+        self.kmin.grid(row=1, column=1, padx=5, pady=5)
+        self.kmin.bind('<Double-Button-1>', self.set_k_min)
 
         tk.Label(self, text="k max: ").grid(row=1, column=2, padx=5, pady=5, sticky='e')
         self.k_max = tk.DoubleVar(value=12.0)
-        tk.Entry(self, width=15, textvariable=self.k_max).grid(row=1, column=3, padx=5, pady=5)
+        self.kmax = tk.Entry(self, width=7, textvariable=self.k_max, state=tk.DISABLED,
+                             disabledbackground='white', disabledforeground='black')
+        self.kmax.grid(row=1, column=3, padx=5, pady=5)
+        self.kmax.bind('<Double-Button-1>', self.set_k_max)
 
-        tk.Label(self, text="k-weight: ").grid(row=1, column=4, padx=5, pady=5, sticky='e')
-        self.kw_ = tk.IntVar(value=1)
-        tk.Entry(self, width=15, textvariable=self.kw_).grid(row=1, column=5, padx=5, pady=5)
+        tk.Label(self, text="k-weight:").grid(row=1, column=4, padx=5, pady=5, sticky='e')
+        self.kw_ = tk.IntVar(self)
+        weights_ = [i for i in range(5)]
+        self.kw_.set(weights_[1])  # set the default option
+        self.kw_menu = tk.OptionMenu(self, self.kw_, *weights_)
+        self.kw_menu.grid(row=1, column=5, padx=5, pady=5, sticky="ew")
+        self.kw_menu.configure(width=10)
+
+    def set_k_shift(self, *args):
+        new_k_shift = simpledialog.askfloat(title="k-shift", prompt="Set value for data shift in k-space",
+                                            minvalue=-10, maxvalue=10)
+        if new_k_shift:
+            self.k_shift_value.set(new_k_shift)
+
+    def set_magnitude(self, *args):
+        new_mag = simpledialog.askfloat(title="Magnitude coeff.", prompt="Set value for signal magnitude coefficient",
+                                        minvalue=0.01, maxvalue=1.)
+        if new_mag:
+            self.s02.set(new_mag)
+
+    def set_k_min(self, *args):
+        new_kmin = simpledialog.askfloat(title="Window func. k-min", prompt="Set lowest bound  value for window "
+                                                                            "function",
+                                         minvalue=0, maxvalue=self.k_max.get())
+        if new_kmin:
+            self.k_min.set(new_kmin)
+
+    def set_k_max(self, *args):
+        new_kmax = simpledialog.askfloat(title="Window func. k-max", prompt="Set highest bound  value for window "
+                                                                            "function",
+                                         minvalue=self.k_min.get(), maxvalue=20)
+        if new_kmax:
+            self.k_max.set(new_kmax)
 
 
 class BaseDataFrame(tk.Frame):
@@ -313,12 +364,12 @@ class XAFSModelMixerAPI:
 
     def collect_params(self):
         params = {
-            'amp': float(self.params_frame.s02.get()),
-            'k_weight': float(self.params_frame.kw_.get()),
-            'k_min': float(self.params_frame.k_min.get()),
-            'k_max': float(self.params_frame.k_max.get()),
+            'k_weight': self.params_frame.kw_.get(),
+            'k_shift': self.params_frame.k_shift_value.get(),
             'window': self.params_frame.wind.get(),
-            'k_shift': float(self.params_frame.k_shift_value.get()),
+            'k_min':    self.params_frame.k_min.get(),
+            'k_max':    self.params_frame.k_max.get(),
+            'amp': self.params_frame.s02.get(),
         }
         print(params)
         return params
