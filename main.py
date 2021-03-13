@@ -1,7 +1,6 @@
 import os
 import tkinter as tk
-from tkinter.filedialog import askopenfilename
-from tkinter.simpledialog import askstring, askfloat, askinteger
+from tkinter import colorchooser, filedialog, simpledialog
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
 from utils.dataset import Dataset, DataManager
@@ -10,18 +9,15 @@ from utils.dataset import Dataset, DataManager
 class ParamsFrame(tk.Frame):
     def __init__(self, parent):
         super().__init__(parent, border=2, relief=tk.GROOVE)
-
+        # TODO: Replace with <simpledialog> methods
         tk.Label(self, text="k-shift: ").grid(row=0, column=0, padx=5, pady=5, sticky='e')
         self.k_shift_value = tk.DoubleVar(value=0.0)
-        # TODO: check if entry can by created without assigning if value can be obtained by tkVar()
-        self.k_shift = tk.Entry(self, width=15, textvariable=self.k_shift_value)
-        self.k_shift.grid(row=0, column=1, padx=5, pady=5)
+        tk.Entry(self, width=15, textvariable=self.k_shift_value).grid(row=0, column=1, padx=5, pady=5)
 
         # first row
         tk.Label(self, text="Amp.: ").grid(row=0, column=2, padx=5, pady=5, sticky='e')
         self.s02 = tk.DoubleVar(value=0.81)
-        self.amp = tk.Entry(self, width=15, textvariable=self.s02)
-        self.amp.grid(row=0, column=3, padx=5, pady=5)
+        tk.Entry(self, width=15, textvariable=self.s02).grid(row=0, column=3, padx=5, pady=5)
 
         # Create window function selector
         tk.Label(self, text="Window function:").grid(row=0, column=4, padx=5, pady=5)
@@ -35,51 +31,130 @@ class ParamsFrame(tk.Frame):
         # second row:
         tk.Label(self, text="k min: ").grid(row=1, column=0, padx=5, pady=5, sticky='e')
         self.k_min = tk.DoubleVar(value=3.5)
-        self.kmin = tk.Entry(self, width=15, textvariable=self.k_min)
-        self.kmin.grid(row=1, column=1, padx=5, pady=5)
+        tk.Entry(self, width=15, textvariable=self.k_min).grid(row=1, column=1, padx=5, pady=5)
 
         tk.Label(self, text="k max: ").grid(row=1, column=2, padx=5, pady=5, sticky='e')
         self.k_max = tk.DoubleVar(value=12.0)
-        self.kmax = tk.Entry(self, width=15, textvariable=self.k_max)
-        self.kmax.grid(row=1, column=3, padx=5, pady=5)
+        tk.Entry(self, width=15, textvariable=self.k_max).grid(row=1, column=3, padx=5, pady=5)
 
         tk.Label(self, text="k-weight: ").grid(row=1, column=4, padx=5, pady=5, sticky='e')
         self.kw_ = tk.IntVar(value=1)
-        self.kw = tk.Entry(self, width=15, textvariable=self.kw_)
-        self.kw.grid(row=1, column=5, padx=5, pady=5)
+        tk.Entry(self, width=15, textvariable=self.kw_).grid(row=1, column=5, padx=5, pady=5)
 
 
-class ExperimentalDataFrame(tk.Frame):
-    def __init__(self, parent, gui):
-        super().__init__(parent, border=2, relief=tk.GROOVE)
+class BaseDataFrame(tk.Frame):
+    def __init__(self, gui):
+        super().__init__(gui.master, border=2, relief=tk.GROOVE)
         self.gui = gui
-        self.dataset: Dataset = None
-        self.add_exp_data = tk.Button(
+        self.dataset: [Dataset, None] = None
+
+        self.name_value = tk.StringVar()
+        self.name = tk.Entry(self, width=30, textvariable=self.name_value, disabledbackground='white',
+                             disabledforeground='black')
+        self.name.grid(row=0, column=0, columnspan=2, padx=5, pady=5, stick='we')
+        self.name.config(state=tk.DISABLED)
+        self.name.bind('<Double-Button-1>', self.rename_dataset)
+
+        tk.Label(self, text="line width:").grid(row=1, column=2, padx=5, pady=5, sticky='e')
+        self.line_width = tk.DoubleVar(self)
+        self.line_width_entry = tk.Entry(self, width=7, textvariable=self.line_width, disabledbackground='white',
+                                         disabledforeground='black')
+        self.line_width_entry.grid(row=1, column=3, padx=5, pady=5, sticky="ew")
+        self.line_width_entry.config(state=tk.DISABLED)
+        self.line_width_entry.bind('<Double-Button-1>', self.change_line_width)
+
+        tk.Label(self, text="line style:").grid(row=1, column=4, padx=5, pady=5, sticky='e')
+        self.line_style = tk.StringVar(self)
+        choices = ('solid', 'dashed', 'dashdot', 'dotted')
+        self.line_style.set(choices[0])  # set the default option
+        self.line_style_menu = tk.OptionMenu(self, self.line_style, *choices)
+        self.line_style_menu.grid(row=1, column=5, padx=5, pady=5, sticky="ew")
+        self.line_style_menu.configure(width=7, state='disable')
+        self.line_style.trace_add('write', self.change_line_style)
+
+        self.color = tk.Label(self, text="", bg='black', width=3)
+        self.color.grid(row=1, column=6, padx=5, pady=5, sticky='we')
+        self.color.bind('<Double-Button-1>', self.change_color)
+
+    def rename_dataset(self, *args):
+        if self.dataset:
+            current_name = self.name_value.get()
+            new_name = simpledialog.askstring('Change data label', 'Change name', initialvalue=current_name)
+            if new_name and new_name != current_name:
+                ds_idx = self.gui.data.index(self.dataset)
+                self.name_value.set(new_name)
+                self.dataset.name = new_name
+                self.gui.data[ds_idx] = self.dataset
+
+    def change_line_width(self, *args):
+        if self.dataset:
+            lw = simpledialog.askfloat(title="Line width", prompt="Set curve line width", minvalue=0.1, maxvalue=10)
+            if lw:
+                self.line_width.set(lw)
+                self.dataset.lw = lw
+
+    def change_color(self, *args):
+        if self.dataset:
+            new_color = colorchooser.askcolor()[-1]  # take only in hex-form
+            if new_color:
+                self.dataset.color = new_color
+                self.color.config(bg=new_color)
+
+    def change_line_style(self, *args):
+        if self.dataset:
+            new_ls = self.line_style.get()
+            print(new_ls)
+            self.dataset.ls = new_ls
+
+
+class ExperimentalDataFrame(BaseDataFrame):
+    def __init__(self, gui):
+        super().__init__(gui=gui)
+        self.gui = gui
+        # self.dataset: Dataset = None
+        self.name_value.set("No imported Data")
+        tk.Button(
             self,
             text="Import Experimental data",
             relief=tk.RAISED,
             command=lambda: self.gui.import_file(self),
             width=25,
-        )
-        self.add_exp_data.grid(row=0, column=0, padx=5, pady=5, stick='ws')
+        ).grid(row=1, column=0, columnspan=2, padx=5, pady=5, stick='we')
 
-        self.name = tk.Entry(self, width=30, text='No imported data', disabledbackground='white',
-                             disabledforeground='black')
-        self.name.grid(row=1, column=0, padx=5, pady=5, stick='ws')
-        self.name.config(state=tk.DISABLED)
 
-        self.change_name = tk.Button(
+class ModelDataFrame(BaseDataFrame):
+    def __init__(self, gui, dataset):
+
+        super().__init__(gui=gui)
+        self.gui = gui
+        self.dataset: Dataset = dataset
+
+        # open data button
+        tk.Button(
             self,
-            text="Rename",
+            text="...",
             relief=tk.RAISED,
-            command=lambda: self.gui.rename_dataset(self),
+            command=lambda: self.gui.import_file(self),
             width=10,
-        )
-        self.change_name.grid(row=1, column=1, padx=5, pady=5, stick='ws')
-        self.name.bind('<Double-Button-1>', self.double_click_handler)
+        ).grid(row=1, column=0, padx=5, pady=5, stick='we')
 
-    def double_click_handler(self, event):
-        self.gui.rename_dataset(self)
+        # remove frame
+        tk.Button(
+            self,
+            text="X",
+            relief=tk.RAISED,
+            command=lambda: self.gui.delete_data_frame(self),
+            width=10,
+            fg='red',
+        ).grid(row=1, column=1, padx=5, pady=5, stick='we')
+
+        tk.Label(self, text="weight: ").grid(row=0, column=2, padx=5, pady=5, sticky='e')
+        self.w = tk.DoubleVar(value=0.0)
+        self.weight = tk.Entry(self, width=7, textvariable=self.w)
+        self.weight.grid(row=0, column=3, padx=5, pady=5, stick='we')
+
+        # self.hold_w_value = tk.BooleanVar()
+        # tk.Checkbutton(self, text="Freeze weight", variable=self.hold_w_value).grid(row=0, column=4, stick='sn')
 
 
 class PlotWindow:
@@ -124,62 +199,6 @@ class PlotWindow:
         self.canvas.draw()
 
 
-class ModelDataFrame(tk.Frame):
-    # TODO: inherit from experimental Frame and do review of the class
-    def __init__(self, parent, gui, dataset):
-
-        super().__init__(parent, border=2, relief=tk.GROOVE)
-        self.gui = gui
-        self.dataset: Dataset = dataset
-
-        self.name = tk.Entry(self, width=30, disabledbackground='white', disabledforeground='black')
-        self.name.grid(row=0, column=0, padx=5, pady=5, stick='ws')
-        self.name.insert(0, dataset.name)
-        self.name.config(state=tk.DISABLED)
-
-        self.name.bind('<Double-Button-1>', self.double_click_handler)
-
-        # TODO: remove the 'rename' button
-        tk.Label(self, text="weight: ").grid(row=0, column=1, padx=5, pady=5, sticky='e')
-        self.w = tk.DoubleVar(value=0.0)
-        self.weight = tk.Entry(self, width=15, textvariable=self.w)
-        self.weight.grid(row=0, column=2, padx=5, pady=5, stick='ws')
-
-        self.hold_w_value = tk.BooleanVar()
-        self.hold_w = tk.Checkbutton(self, text="Freeze weight", variable=self.hold_w_value)
-        self.hold_w.grid(row=0, column=3, stick='sn')
-
-        self.change_name = tk.Button(
-            self,
-            text="Rename",
-            relief=tk.RAISED,
-            command=lambda: self.gui.rename_dataset(self),
-            width=25,
-        )
-        self.change_name.grid(row=1, column=0, padx=5, pady=5, stick='ws')
-
-        self.reopen = tk.Button(
-            self,
-            text="...",
-            relief=tk.RAISED,
-            command=lambda: self.gui.import_file(self),
-            width=10,
-        )
-        self.reopen.grid(row=1, column=1, padx=5, pady=5, stick='ws')
-
-        self.remove = tk.Button(
-            self,
-            text="X",
-            relief=tk.RAISED,
-            command=lambda: self.gui.delete_data_frame(self),
-            width=10,
-        )
-        self.remove.grid(row=1, column=3, padx=5, pady=5, stick='e')
-        # TODO: add method that collect al parameters for given dataset from corresponding frame
-
-    def double_click_handler(self, event):
-        self.gui.rename_dataset(self)
-
 class XAFSModelMixerAPI:
 
     def __init__(self, master):
@@ -217,7 +236,7 @@ class XAFSModelMixerAPI:
         self.plot_R_btn.grid(row=1, column=1, padx=5, pady=5)
 
         # experimental frame
-        self.experimental_data = ExperimentalDataFrame(self.master, gui=self)
+        self.experimental_data = ExperimentalDataFrame(gui=self)
         self.experimental_data.grid(row=2, column=0, padx=10, pady=10, sticky='we')
 
         self.add_model_btn = tk.Button(
@@ -252,7 +271,7 @@ class XAFSModelMixerAPI:
         self.current_row -= 1
 
     def import_file(self, invoker):
-        filepath = askopenfilename(
+        filepath = filedialog.askopenfilename(
             filetypes=(
                 ("Chi file", "*.chi"),
                 ("Data file", "*.dat"),
@@ -266,48 +285,42 @@ class XAFSModelMixerAPI:
                 self.data.remove(invoker.dataset)
             self.data.append(dataset)
             invoker.dataset = dataset
-            invoker.name.config(state=tk.NORMAL)
-            invoker.name.delete(0, tk.END)
-            invoker.name.insert(0, os.path.splitext(os.path.basename(filepath))[0])
-            invoker.name.config(state=tk.DISABLED)
-
-    def rename_dataset(self, invoker):
-        if invoker.dataset:
-            current_name = invoker.name.get()
-            new_name = askstring('Change data label', 'Change name', initialvalue=current_name)
-            if new_name and new_name != current_name:
-                ds_idx = self.data.index(invoker.dataset)
-                invoker.name.config(state=tk.NORMAL)
-                invoker.name.delete(0, tk.END)
-                invoker.name.insert(0, new_name)
-                invoker.name.config(state=tk.DISABLED)
-                invoker.dataset.name = new_name
-                self.data[ds_idx] = invoker.dataset
+            invoker.line_width.set(dataset.lw)
+            if invoker.line_style_menu['state'] == 'disabled':
+                invoker.line_style_menu.config(state='normal')
+            else:
+                invoker.dataset.ls = invoker.line_style.get()
+            invoker.name_value.set(os.path.splitext(os.path.basename(filepath))[0])
 
     def add_model(self):
-        filepath = askopenfilename(
+        filepath = filedialog.askopenfilename(
             filetypes=(
-                ("data", "*.dat"),
-                ("text", "*.txt"),
-                ("All files", "*.*")
+                ("All files", "*.*"),
+                ("Chi file", "*.chi"),
+                ("Data file", "*.dat"),
+                ("Text file", "*.txt"),
             )
         )
         if filepath:
             dataset = Dataset(filepath)
             self.data.append(dataset)
-            new_data_frame = ModelDataFrame(self.master, gui=self, dataset=dataset)
+            new_data_frame = ModelDataFrame(gui=self, dataset=dataset)
             new_data_frame.grid(row=self.current_row+1, column=0, padx=5, pady=5, sticky='we')
+            new_data_frame.line_width.set(dataset.lw)
+            new_data_frame.name_value.set(dataset.name)
+            new_data_frame.line_style_menu.config(state='normal')
             self.current_row += 1
 
     def collect_params(self):
         params = {
             'amp': float(self.params_frame.s02.get()),
             'k_weight': float(self.params_frame.kw_.get()),
-            'k_min': float(self.params_frame.kmin.get()),
-            'k_max': float(self.params_frame.kmax.get()),
+            'k_min': float(self.params_frame.k_min.get()),
+            'k_max': float(self.params_frame.k_max.get()),
             'window': self.params_frame.wind.get(),
             'k_shift': float(self.params_frame.k_shift_value.get()),
         }
+        print(params)
         return params
 
 
