@@ -154,7 +154,6 @@ class BaseDataFrame(tk.Frame):
     def change_line_style(self, *args):
         if self.dataset:
             new_ls = self.line_style.get()
-            print(new_ls)
             self.dataset.ls = new_ls
 
 
@@ -226,7 +225,6 @@ class PlotWindow:
         toolbar = NavigationToolbar2Tk(self.canvas, self.window)
         toolbar.update()
         self.canvas.get_tk_widget().pack(side=tk.TOP, fill=tk.BOTH, expand=1.0)
-        # self.fig.add_subplot(111)
         self.window.protocol("WM_DELETE_WINDOW", self._on_closing_plot)
 
     def _on_closing_plot(self):
@@ -234,7 +232,8 @@ class PlotWindow:
         self.canvas = None
         self.fig = None
 
-    def update_plot(self):
+    def update_plot(self, *args):
+        pp = self.parent.collect_params()
         if self.canvas is None:
             self.build_plot_window()
         if self.fig.get_axes():
@@ -242,11 +241,26 @@ class PlotWindow:
             ax.cla()
         else:
             ax = self.fig.add_subplot(111)
-        for ds in self.parent.data.get_data_for_plot(self.space, **self.parent.collect_params()):
+        if self.space == 'k':
+            # build label for y-axis in k-space
+            y_label = r'$\chi$(k)' if pp['k_weight'] == 0 else r'k$^{}{}{}\cdot\chi$(k)'.format('{', pp['k_weight'], '}')
+            ax.set_xlabel(r'k, $\AA^{-1}$')
+            ax.set_ylabel(y_label)
+            ax.set_xlim(pp['kx_min'], pp['kx_max'])
+            ax.set_ylim(auto=True)
+        elif self.space == 'r':
+            ax.set_xlabel(r'R, $\AA$')
+            ax.set_ylabel(r'|FT($\chi$)|')
+            ax.set_xlim(pp['rx_min'], pp['rx_max'])
+            ax.set_ylim(auto=True)
+        for ds in self.parent.data.get_data_for_plot(self.space, **pp):
             x, y, attr = ds
             ax.plot(x, y, **attr)
-        if self.fig.get_axes():
+
+        if self.parent.data:
             ax.legend()
+        # ax.autoscale(self, enable=True, axis='y')
+        ax.grid(True)
         self.canvas.draw()
 
 
@@ -255,7 +269,7 @@ class XAFSModelMixerAPI:
     def __init__(self, master):
         self.master = master
         self.master.title("GULP Model Mixer")
-        self.master.geometry("800x600")
+        self.master.geometry("750x600")
 
         self.data = DataManager()
 
@@ -275,7 +289,20 @@ class XAFSModelMixerAPI:
             relief=tk.RAISED,
             width=25,
         )
-        self.plot_k_btn.grid(column=1, row=0, padx=5, pady=5)
+        self.plot_k_btn.grid(row=0, column=1, columnspan=3, padx=5, pady=5)
+
+        self.x_min_k = tk.DoubleVar(value=0)
+        self.xmin_k = tk.Entry(self.master, width=7, textvariable=self.x_min_k, state=tk.DISABLED,
+                               disabledbackground='white', disabledforeground='black')
+        self.xmin_k.grid(row=1, column=1, padx=5, pady=5, sticky='we')
+        self.xmin_k.bind('<Double-Button-1>', self.set_axis_range)
+
+        tk.Label(self.master, text=': min - max :').grid(row=1, column=2, padx=5, pady=5, sticky='we')
+        self.x_max_k = tk.DoubleVar(value=12.0)
+        self.xmax_k = tk.Entry(self.master, width=7, textvariable=self.x_max_k, state=tk.DISABLED,
+                               disabledbackground='white', disabledforeground='black')
+        self.xmax_k.grid(row=1, column=3, padx=5, pady=5, sticky='we')
+        self.xmax_k.bind('<Double-Button-1>', self.set_axis_range)
 
         self.plot_R_btn = tk.Button(
             self.master,
@@ -284,11 +311,24 @@ class XAFSModelMixerAPI:
             relief=tk.RAISED,
             width=25,
         )
-        self.plot_R_btn.grid(row=1, column=1, padx=5, pady=5)
+        self.plot_R_btn.grid(row=2, column=1, columnspan=3, padx=5, pady=5)
+
+        self.x_min_r = tk.DoubleVar(value=1.0)
+        self.xmin_r = tk.Entry(self.master, width=7, textvariable=self.x_min_r, state=tk.DISABLED,
+                               disabledbackground='white', disabledforeground='black')
+        self.xmin_r.grid(row=3, column=1, padx=5, pady=5, sticky='we')
+        self.xmin_r.bind('<Double-Button-1>', self.set_axis_range)
+
+        tk.Label(self.master, text=': min - max :').grid(row=3, column=2, padx=5, pady=5, sticky='we')
+        self.x_max_r = tk.DoubleVar(value=6.0)
+        self.xmax_r = tk.Entry(self.master, width=7, textvariable=self.x_max_r, state=tk.DISABLED,
+                               disabledbackground='white', disabledforeground='black')
+        self.xmax_r.grid(row=3, column=3, padx=5, pady=5, sticky='we')
+        self.xmax_r.bind('<Double-Button-1>', self.set_axis_range)
 
         # experimental frame
         self.experimental_data = ExperimentalDataFrame(gui=self)
-        self.experimental_data.grid(row=2, column=0, padx=10, pady=10, sticky='we')
+        self.experimental_data.grid(row=2, column=0, rowspan=2, padx=10, pady=10, sticky='we')
 
         self.add_model_btn = tk.Button(
             self.master,
@@ -297,7 +337,7 @@ class XAFSModelMixerAPI:
             relief=tk.RAISED,
             width=25,
         )
-        self.add_model_btn.grid(row=3, column=0, padx=5, pady=5, sticky='we')
+        self.add_model_btn.grid(row=4, column=0, padx=5, pady=5, sticky='we')
 
         self.fir_btn = tk.Button(
             self.master,
@@ -306,11 +346,19 @@ class XAFSModelMixerAPI:
             relief=tk.RAISED,
             width=25,
         )
-        self.fir_btn.grid(row=2, column=1, padx=5, pady=5, sticky='s')
+        self.fir_btn.grid(row=4, column=1, columnspan=3, padx=5, pady=5, sticky='s')
 
         # last occupied row in main frame
-        self.current_row = 3
+        self.current_row = 4
         self._plot_test = 1
+
+    def set_axis_range(self, event):
+        val = simpledialog.askfloat(title="Set axis range", prompt="Set axis value limit")
+        if val is not None:
+            event.widget.configure(state=tk.NORMAL)
+            event.widget.delete(0, tk.END)
+            event.widget.insert(0, val)
+            event.widget.configure(state=tk.DISABLED)
 
     def fit(self):
         print('fit in ', self)
@@ -369,9 +417,12 @@ class XAFSModelMixerAPI:
             'window': self.params_frame.wind.get(),
             'k_min':    self.params_frame.k_min.get(),
             'k_max':    self.params_frame.k_max.get(),
-            'amp': self.params_frame.s02.get(),
+            'amp':      self.params_frame.s02.get(),
+            'kx_min':   self.x_min_k.get(),
+            'kx_max':   self.x_max_k.get(),
+            'rx_min':   self.x_min_r.get(),
+            'rx_max':   self.x_max_r.get()
         }
-        print(params)
         return params
 
 
