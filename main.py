@@ -1,5 +1,6 @@
 import os
 import tkinter as tk
+import numpy as np
 from tkinter import (
     colorchooser,
     filedialog,
@@ -10,10 +11,7 @@ from matplotlib.backends.backend_tkagg import (
     FigureCanvasTkAgg,
     NavigationToolbar2Tk,
 )
-from utils.dataset import (
-    Dataset,
-    DataManager,
-)
+from utils.dataset import Dataset
 
 
 class ParamsFrame(tk.Frame):
@@ -27,8 +25,8 @@ class ParamsFrame(tk.Frame):
         self.kshift.bind('<Double-Button-1>', self.set_k_shift)
 
         # first row
-        tk.Label(self, text="Mag.: ").grid(row=0, column=2, padx=5, pady=5, sticky='e')
-        self.s02 = tk.DoubleVar(value=0.81)
+        tk.Label(self, text="s02: ").grid(row=0, column=2, padx=5, pady=5, sticky='e')
+        self.s02 = tk.DoubleVar(value=1.)
         self.mag = tk.Entry(self, width=7, textvariable=self.s02, state=tk.DISABLED,
                             disabledbackground='white', disabledforeground='black')
         self.mag.grid(row=0, column=3, padx=5, pady=5)
@@ -69,7 +67,7 @@ class ParamsFrame(tk.Frame):
     def set_k_shift(self, *args):
         new_k_shift = simpledialog.askfloat(title="k-shift", prompt="Set value for data shift in k-space",
                                             minvalue=-10, maxvalue=10)
-        if new_k_shift:
+        if new_k_shift is not None:
             self.k_shift_value.set(new_k_shift)
 
     def set_magnitude(self, *args):
@@ -82,14 +80,14 @@ class ParamsFrame(tk.Frame):
         new_kmin = simpledialog.askfloat(title="Window func. k-min", prompt="Set lowest bound  value for window "
                                                                             "function",
                                          minvalue=0, maxvalue=self.k_max.get())
-        if new_kmin:
+        if new_kmin is not None:
             self.k_min.set(new_kmin)
 
     def set_k_max(self, *args):
         new_kmax = simpledialog.askfloat(title="Window func. k-max", prompt="Set highest bound  value for window "
                                                                             "function",
                                          minvalue=self.k_min.get(), maxvalue=20)
-        if new_kmax:
+        if new_kmax is not None:
             self.k_max.set(new_kmax)
 
 
@@ -161,6 +159,7 @@ class ExperimentalDataFrame(BaseDataFrame):
     def __init__(self, gui):
         super().__init__(gui=gui)
         self.gui = gui
+        self.experimental = True
         # self.dataset: Dataset = None
         self.name_value.set("No imported Data")
         tk.Button(
@@ -177,6 +176,7 @@ class ModelDataFrame(BaseDataFrame):
 
         super().__init__(gui=gui)
         self.gui = gui
+        self.experimental = True
         self.dataset: Dataset = dataset
 
         # open data button
@@ -210,7 +210,7 @@ class ModelDataFrame(BaseDataFrame):
 class PlotWindow:
 
     def __init__(self, parent, space: str):
-        self.parent = parent
+        self.parent: XAFSModelMixerAPI = parent
         self.window = None
         self.space = space
         self.canvas = None
@@ -233,7 +233,7 @@ class PlotWindow:
         self.fig = None
 
     def update_plot(self, *args):
-        pp = self.parent.collect_params()
+        # pp = self.parent.collect_params()
         if self.canvas is None:
             self.build_plot_window()
         if self.fig.get_axes():
@@ -242,24 +242,25 @@ class PlotWindow:
         else:
             ax = self.fig.add_subplot(111)
         if self.space == 'k':
+            kw = self.parent.params_frame.kw_.get()
             # build label for y-axis in k-space
-            y_label = r'$\chi$(k)' if pp['k_weight'] == 0 else r'k$^{}{}{}\cdot\chi$(k)'.format('{', pp['k_weight'], '}')
+            y_label = r'$\chi$(k)' if kw == 0 else r'k$^{}{}{}\cdot\chi$(k)'.format('{', kw, '}')
+
             ax.set_xlabel(r'k, $\AA^{-1}$')
             ax.set_ylabel(y_label)
-            ax.set_xlim(pp['kx_min'], pp['kx_max'])
+            ax.set_xlim(self.parent.x_min_k.get(), self.parent.x_max_k.get())
             ax.set_ylim(auto=True)
         elif self.space == 'r':
             ax.set_xlabel(r'R, $\AA$')
             ax.set_ylabel(r'|FT($\chi$)|')
-            ax.set_xlim(pp['rx_min'], pp['rx_max'])
+            ax.set_xlim(self.parent.x_min_r.get(), self.parent.x_max_r.get())
             ax.set_ylim(auto=True)
-        for ds in self.parent.data.get_data_for_plot(self.space, **pp):
+        for ds in self.parent.get_data_for_plot(self.space):
             x, y, attr = ds
             ax.plot(x, y, **attr)
 
         if self.parent.data:
             ax.legend()
-        # ax.autoscale(self, enable=True, axis='y')
         ax.grid(True)
         self.canvas.draw()
 
@@ -271,7 +272,8 @@ class XAFSModelMixerAPI:
         self.master.title("GULP Model Mixer")
         self.master.geometry("750x600")
 
-        self.data = DataManager()
+        # self.data = DataManager()
+        self.data: [Dataset] = []
 
         # plot stuff
         self.k_space_plot = PlotWindow(self, 'k')
@@ -298,7 +300,7 @@ class XAFSModelMixerAPI:
         self.xmin_k.bind('<Double-Button-1>', self.set_axis_range)
 
         tk.Label(self.master, text=': min - max :').grid(row=1, column=2, padx=5, pady=5, sticky='we')
-        self.x_max_k = tk.DoubleVar(value=12.0)
+        self.x_max_k = tk.DoubleVar(value=20.0)
         self.xmax_k = tk.Entry(self.master, width=7, textvariable=self.x_max_k, state=tk.DISABLED,
                                disabledbackground='white', disabledforeground='black')
         self.xmax_k.grid(row=1, column=3, padx=5, pady=5, sticky='we')
@@ -332,7 +334,7 @@ class XAFSModelMixerAPI:
 
         self.add_model_btn = tk.Button(
             self.master,
-            text="Add data",
+            text="Add model",
             command=self.add_model,
             relief=tk.RAISED,
             width=25,
@@ -361,7 +363,19 @@ class XAFSModelMixerAPI:
             event.widget.configure(state=tk.DISABLED)
 
     def fit(self):
+        # TODO: collect data with fixed weights
+        # TODO: stack data into two different array: data_for_fit, fixed_weight_data
+        # TODO: create init (random) weight array: np.random.dirichlet(np.ones(data_for_fit.shape[0]))
+
         print('fit in ', self)
+        # popt, pcov = curve_fit(wighted_sum, x, y, p0=w, bounds=(0, 1))
+
+    @staticmethod
+    def __wighted_sum(model_data, weights,  *args, **kwargs):
+        weights = np.expand_dims(np.array(args), axis=-1)
+        # weights = np.array(args)
+        out = (model_data * weights).sum(axis=0)
+        return out
 
     def delete_data_frame(self, frame: ModelDataFrame):
         self.data.remove(frame.dataset)
@@ -384,6 +398,7 @@ class XAFSModelMixerAPI:
                 self.data.remove(invoker.dataset)
             self.data.append(dataset)
             invoker.dataset = dataset
+            invoker.dataset.is_experimental = invoker.experimental
             invoker.line_width.set(dataset.lw)
             if invoker.line_style_menu['state'] == 'disabled':
                 invoker.line_style_menu.config(state='normal')
@@ -410,20 +425,107 @@ class XAFSModelMixerAPI:
             new_data_frame.line_style_menu.config(state='normal')
             self.current_row += 1
 
-    def collect_params(self):
-        params = {
-            'k_weight': self.params_frame.kw_.get(),
-            'k_shift': self.params_frame.k_shift_value.get(),
-            'window': self.params_frame.wind.get(),
-            'k_min':    self.params_frame.k_min.get(),
-            'k_max':    self.params_frame.k_max.get(),
-            'amp':      self.params_frame.s02.get(),
-            'kx_min':   self.x_min_k.get(),
-            'kx_max':   self.x_max_k.get(),
-            'rx_min':   self.x_min_r.get(),
-            'rx_max':   self.x_max_r.get()
-        }
-        return params
+    def window_function(self, k):
+        k_wind = np.zeros(len(k))
+        dx = 1
+
+        # get windows target area from GUI widget
+        kmin = self.params_frame.k_min.get()
+        kmax = self.params_frame.k_max.get()
+        window = self.params_frame.wind.get()
+        eps = 0.01
+
+        # get indices of k-values for allocation window function borders
+        kmin_ind = np.where(np.abs(k - kmin) < eps)[0][0]
+        kmin_ind1 = np.where(np.abs(k - (kmin + dx)) < eps)[0][0]
+        kmax_ind = np.where(np.abs(k - kmax) < eps)[0][0]
+        kmax_ind1 = np.where(np.abs(k - (kmax - dx)) < eps)[0][0]
+
+        # build window (_/-\_ -> _/|\_ -> _/----\_)
+        windows_length = len(k[kmin_ind:kmin_ind1 + 1])
+
+        if window == 'kaiser':
+            init_window = np.kaiser(2 * windows_length, 3)
+        elif window == 'bartlett':
+            init_window = np.bartlett(2 * windows_length)
+        elif window == "blackman":
+            init_window = np.blackman(2 * windows_length)
+        elif window == "hamming":
+            init_window = np.hamming(2 * windows_length)
+        elif window == "hanning":
+            init_window = np.hanning(2 * windows_length)
+        else:
+            # TODO replace with rectangle window by default?
+            raise ValueError("Wrong name for window function")
+
+        max2 = np.where(init_window == max(init_window))[0][1]
+
+        dx1 = [init_window[0:max2]][0]
+        dx2 = [init_window[max2:]][0]
+
+        win_shift = int(len(dx1) / 2)
+
+        k_wind[kmin_ind - win_shift:kmin_ind1 - win_shift + 1] = dx1
+        k_wind[kmax_ind1 + win_shift:kmax_ind + win_shift + 1] = dx2
+        k_wind[kmin_ind1 - win_shift:kmax_ind1 + win_shift] = max(init_window)
+        return k_wind
+
+    def calculate_fft(self, chi, k_step, n_samples: int = 2048):
+        """
+        Perform Fourier Transform with dataset
+        :param chi: chi-data - must be windowed already AND:
+            (1) weighted with s02 [if theoretical]
+            (2) k-shifted [if experimental]
+            (3) weighted [if for fitting and not experimental]
+        :param k_step: step size in k-space
+        :param n_samples:
+        :return: r and sqrt(Im^2 + Re^2)
+        """
+
+        rstep = np.pi / (k_step * n_samples)
+
+        ft_chi = np.fft.fft(chi, n=n_samples) * (k_step / np.sqrt(np.pi))
+
+        rmax_index = n_samples // 2
+        ft_mod = np.sqrt(ft_chi.real ** 2 + ft_chi.imag ** 2)
+        r = rstep * np.arange(rmax_index)
+        return r[:rmax_index], ft_mod[:rmax_index]
+
+    def get_data_for_plot(self, space):
+        _out = []
+        # Get necessary params from API entry fields
+        k_shift = self.params_frame.k_shift_value.get(),
+        s02     = self.params_frame.s02.get(),
+        kw      = self.params_frame.kw_.get()
+        if space == 'k':
+            # TODO: add possibility to plot windowed data
+            for dataset in self.data:
+                attr_for_plot = {'label': dataset.name, 'ls': dataset.ls, 'lw': dataset.lw, 'c': dataset.color}
+                if dataset.is_experimental:
+                    k = dataset.k + k_shift
+                    _out.append([k, dataset.chi * k ** kw, attr_for_plot])
+                else:
+                    _out.append([dataset.k,  s02*dataset.chi * dataset.k ** kw, attr_for_plot])
+
+        elif space == 'r':
+            for dataset in self.data:
+                attr_for_plot = {'label': dataset.name, 'ls': dataset.ls, 'lw': dataset.lw, 'c': dataset.color}
+                if dataset.is_experimental:
+                    k = dataset.k + k_shift
+                    window = self.window_function(k)
+                    _chi = (dataset.chi * k ** kw)*window
+                    r, ft = self.calculate_fft(chi=_chi, k_step=dataset.k_step)
+                    _out.append([r, ft, attr_for_plot])
+                else:
+                    window = self.window_function(dataset.k)
+                    _chi = (s02*dataset.chi * dataset.k ** kw) * window
+                    r, ft = self.calculate_fft(chi=_chi, k_step=dataset.k_step)
+                    _out.append([r, ft, attr_for_plot])
+        else:
+            print(f"Unknown space {space}")
+
+        # TODO: add fit plot to plotting data
+        return _out
 
 
 if __name__ == "__main__":
