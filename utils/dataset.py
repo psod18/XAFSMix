@@ -9,8 +9,8 @@ class Dataset:
         self._k_row = k_row
         self._chi_row = chi_row
         self.is_experimental = experimental
-        self.k, self.chi = self.read_data()
-        self.k_step = self.k[1] - self.k[0]
+        self._k, self._chi = self.read_data()
+        self.k_step = self._k[1] - self._k[0]
 
         # plotting stuff
         self.color = "#000000"
@@ -21,7 +21,24 @@ class Dataset:
         return self.name
 
     def read_data(self):
+        """
+        read data from file and extract k- and chi-column
+        :return: tuple of numpy arrays (k, chi)
+        """
         data = np.loadtxt(self._full_path)
-        _k = data[:, self._k_row]
-        _chi = data[:, self._chi_row]
-        return _k, _chi
+        k = data[:, self._k_row]
+        chi = data[:, self._chi_row]
+        return k, chi
+
+    def get_k_chi(self, kw: int, s02: float, k_shift: float):
+        """
+        Return processed  k-value (apply k-shift): k = k + shift
+        and chi-values (multiply chi by s02 coef. and by k power to kw, i.e. k-weight) chi = s02 * chi * k^kw
+        :param kw: k-weight, exponent value
+        :param s02: magnitude reduction factor
+        :param k_shift: shift in k-space
+        :return: tuple of numpy arrays (k, chi)
+        """
+        k = self._k + k_shift if self.is_experimental else self._k
+        chi = s02 * self._chi * k ** kw
+        return k, chi

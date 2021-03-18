@@ -125,7 +125,7 @@ class BaseDataFrame(tk.Frame):
         self.color.grid(row=1, column=6, padx=5, pady=5, sticky='we')
         self.color.bind('<Double-Button-1>', self.change_color)
 
-    def rename_dataset(self, *args):
+    def rename_dataset(self, event):
         if self.dataset:
             current_name = self.name_value.get()
             new_name = simpledialog.askstring('Change data label', 'Change name', initialvalue=current_name)
@@ -492,40 +492,38 @@ class XAFSModelMixerAPI:
         return r[:rmax_index], ft_mod[:rmax_index]
 
     def get_data_for_plot(self, space):
-        _out = []
+        out = []
         # Get necessary params from API entry fields
-        k_shift = self.params_frame.k_shift_value.get(),
-        s02     = self.params_frame.s02.get(),
+        k_shift = self.params_frame.k_shift_value.get()
+        s02     = self.params_frame.s02.get()
         kw      = self.params_frame.kw_.get()
+
         if space == 'k':
             # TODO: add possibility to plot windowed data
             for dataset in self.data:
                 attr_for_plot = {'label': dataset.name, 'ls': dataset.ls, 'lw': dataset.lw, 'c': dataset.color}
                 if dataset.is_experimental:
-                    k = dataset.k + k_shift
-                    _out.append([k, dataset.chi * k ** kw, attr_for_plot])
+                    k, chi = dataset.get_k_chi(kw=kw, s02=1., k_shift=k_shift)
                 else:
-                    _out.append([dataset.k,  s02*dataset.chi * dataset.k ** kw, attr_for_plot])
+                    k, chi = dataset.get_k_chi(kw=kw, s02=s02, k_shift=0)
+                out.append([k, chi, attr_for_plot])
 
         elif space == 'r':
             for dataset in self.data:
                 attr_for_plot = {'label': dataset.name, 'ls': dataset.ls, 'lw': dataset.lw, 'c': dataset.color}
                 if dataset.is_experimental:
-                    k = dataset.k + k_shift
-                    window = self.window_function(k)
-                    _chi = (dataset.chi * k ** kw)*window
-                    r, ft = self.calculate_fft(chi=_chi, k_step=dataset.k_step)
-                    _out.append([r, ft, attr_for_plot])
+                    k, chi = dataset.get_k_chi(kw=kw, s02=1., k_shift=k_shift)
                 else:
-                    window = self.window_function(dataset.k)
-                    _chi = (s02*dataset.chi * dataset.k ** kw) * window
-                    r, ft = self.calculate_fft(chi=_chi, k_step=dataset.k_step)
-                    _out.append([r, ft, attr_for_plot])
+                    k, chi = dataset.get_k_chi(kw=kw, s02=s02, k_shift=0)
+                window = self.window_function(k)
+                chi = chi * window
+                r, ft = self.calculate_fft(chi=chi, k_step=dataset.k_step)
+                out.append([r, ft, attr_for_plot])
         else:
             print(f"Unknown space {space}")
 
         # TODO: add fit plot to plotting data
-        return _out
+        return out
 
 
 if __name__ == "__main__":
