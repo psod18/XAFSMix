@@ -1,6 +1,7 @@
 import os
 import tkinter as tk
 import numpy as np
+import itertools as it
 from tkinter import (
     colorchooser,
     filedialog,
@@ -11,6 +12,8 @@ from matplotlib.backends.backend_tkagg import (
     FigureCanvasTkAgg,
     NavigationToolbar2Tk,
 )
+from scipy.optimize import curve_fit
+
 from utils.dataset import Dataset
 
 
@@ -125,7 +128,7 @@ class BaseDataFrame(tk.Frame):
         self.color.grid(row=1, column=6, padx=5, pady=5, sticky='we')
         self.color.bind('<Double-Button-1>', self.change_color)
 
-    def rename_dataset(self, event):
+    def rename_dataset(self, *args):
         if self.dataset:
             current_name = self.name_value.get()
             new_name = simpledialog.askstring('Change data label', 'Change name', initialvalue=current_name)
@@ -363,19 +366,86 @@ class XAFSModelMixerAPI:
             event.widget.configure(state=tk.DISABLED)
 
     def fit(self):
-        # TODO: collect data with fixed weights
-        # TODO: stack data into two different array: data_for_fit, fixed_weight_data
-        # TODO: create init (random) weight array: np.random.dirichlet(np.ones(data_for_fit.shape[0]))
+        if self.experimental_data.dataset is None:
+            print("No experimental data for fitting procedure")
+            # TODO: popup warning
+            return False
+        if len(self.data) == 1:
+            print("No model data for fitting procedure")
+            return False
 
-        print('fit in ', self)
-        # popt, pcov = curve_fit(wighted_sum, x, y, p0=w, bounds=(0, 1))
+        # get common params
+        k_shift = self.params_frame.k_shift_value.get()
+        kw = self.params_frame.kw_.get()
+        s02 = self.params_frame.s02.get()
+
+        fix_w_data = []
+        data_to_fit = []
+        w_fix = []
+        for ds in self.data:
+            if ds.is_experimental:
+                k, chi = ds.get_k_chi(kw=kw, s02=1., k_shift=k_shift)
+                window = self.window_function(k)
+                chi = chi * window
+                r_exp, ft_exp = self.calculate_fft(chi=chi, k_step=ds.k_step)
+            else:
+                if ds.fix_mix_w:
+                    w_fix.append(ds.fix_mix_w)
+                    fix_w_data.append(ds)
+                else:
+                    data_to_fit.append(ds)
+
+        fix_w_data = [ds.get_chi() for ds in fix_w_data]
+        to_fit = [ds.get_chi() for ds in data_to_fit]
+
+        k_models, dk_step = data_to_fit[-1].get_k(), data_to_fit[-1].k_step  # get k common for all models (ensure,
+                                                                             # that all models have identical k )
+
+        weights = self.create_weight_matrix(n_models=len(data_to_fit), max_w=1 - sum(w_fix))
+        # TODO: create Custom dict, that have
+        weights_r_factor_dict = {}
+        for w_set in weights:
+            mixed_chi = self.get_weighted_sum(fix_w_models=fix_w_data, fix_weights=w_fix, fit_models=to_fit,
+                                              fit_weights=w_set)
+            window = self.window_function(k_models)
+            mixed_chi = (s02 * mixed_chi * k_models ** kw) * window
+            r_mod, ft_mod = self.calculate_fft(chi=mixed_chi, k_step=dk_step)
+            r_factor = self._calc_chi_squared(exp_data=ft_exp, model=ft_mod)
+            if len(weights_r_factor_dict) < 10:
+                weights_r_factor_dict[w_set] = r_factor
+            else:
+                min_r = min(weights_r_factor_dict.keys(), key=weights_r_factor_dict.__getitem__)
+                if r_factor < weights_r_factor_dict[min_r]:
+                    del weights_r_factor_dict[min_r]
+                    weights_r_factor_dict[w_set] = r_factor
+        for v in weights_r_factor_dict.values():
+            print(v)
 
     @staticmethod
-    def __wighted_sum(model_data, weights,  *args, **kwargs):
-        weights = np.expand_dims(np.array(args), axis=-1)
-        # weights = np.array(args)
-        out = (model_data * weights).sum(axis=0)
-        return out
+    def get_weighted_sum(fix_w_models, fix_weights, fit_models, fit_weights):
+        w = list(fit_weights) + fix_weights
+        if fix_w_models:
+            mix_chi = (np.vstack([fix_w_models, fit_models]).T * w).T.sum(axis=0)
+        else:
+            mix_chi = (np.array(fit_models).T * w).T.sum(axis=0)
+        return mix_chi
+
+    @staticmethod
+    def create_weight_matrix(n_models: int, max_w: float):
+        _weights = []
+        step = 100
+        eps = 5 / (step * 10)
+        w = [i / step for i in range(int(max_w*step) + 1)]
+        prod = it.product(w, repeat=n_models)
+
+        for i in prod:
+            if max_w - eps <= sum(i) <= max_w + eps:
+                _weights.append(i)
+        return _weights
+
+    @staticmethod
+    def _calc_chi_squared(exp_data, model):
+        return np.sum((exp_data - model)**2)/np.sum(exp_data**2)
 
     def delete_data_frame(self, frame: ModelDataFrame):
         self.data.remove(frame.dataset)
@@ -469,8 +539,8 @@ class XAFSModelMixerAPI:
         k_wind[kmax_ind1 + win_shift:kmax_ind + win_shift + 1] = dx2
         k_wind[kmin_ind1 - win_shift:kmax_ind1 + win_shift] = max(init_window)
         return k_wind
-
-    def calculate_fft(self, chi, k_step, n_samples: int = 2048):
+    @staticmethod
+    def calculate_fft(chi, k_step, n_samples: int = 2048):
         """
         Perform Fourier Transform with dataset
         :param chi: chi-data - must be windowed already AND:

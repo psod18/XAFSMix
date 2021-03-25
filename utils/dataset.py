@@ -17,6 +17,10 @@ class Dataset:
         self.ls = '-'
         self.lw = 1.5
 
+        # fitting stuff
+        self.fix_mix_w = False
+        self.mix_w = 1.
+
     def __repr__(self):
         return self.name
 
@@ -42,3 +46,9 @@ class Dataset:
         k = self._k + k_shift if self.is_experimental else self._k
         chi = s02 * self._chi * k ** kw
         return k, chi
+
+    def get_chi(self):
+        return self._chi
+
+    def get_k(self):
+        return self._k
