@@ -91,14 +91,14 @@ class XAFSModelMixerAPI:
         )
         self.add_model_btn.grid(row=4, column=0, padx=5, pady=5, sticky='we')
 
-        self.fir_btn = tk.Button(
+        self.fit_btn = tk.Button(
             self.master,
             text="Fit",
             command=self.fit,
             relief=tk.RAISED,
             width=25,
         )
-        self.fir_btn.grid(row=4, column=1, columnspan=3, padx=5, pady=5, sticky='s')
+        self.fit_btn.grid(row=4, column=1, columnspan=3, padx=5, pady=5, sticky='s')
 
         # last occupied row in main frame
         self.current_row = 4
@@ -125,10 +125,13 @@ class XAFSModelMixerAPI:
         k_shift = self.params_frame.k_shift_value.get()
         kw = self.params_frame.kw_.get()
         s02 = self.params_frame.s02.get()
+        min_r = self.x_min_r.get()
+        max_r = self.x_max_r.get()
 
         fix_w_data = []
         data_to_fit = []
         w_fix = []
+
         for ds in self.data:
             if ds.is_experimental:
                 k, chi = ds.get_k_chi(kw=kw, s02=1., k_shift=k_shift)
@@ -142,32 +145,43 @@ class XAFSModelMixerAPI:
                 else:
                     data_to_fit.append(ds)
 
-        fix_w_data = [ds.get_chi() for ds in fix_w_data]
+        min_r_idx = np.where(r_exp > min_r)[0][0]
+        max_r_idx = np.where(r_exp > max_r)[0][0]
+
+        """
+        kmin_ind = np.where(np.abs(k - kmin) < eps)[0][0]
+        kmin_ind1 = np.where(np.abs(k - (kmin + dx)) < eps)[0][0]
+        kmax_ind = np.where(np.abs(k - kmax) < eps)[0][0]
+        kmax_ind1 = np.where(np.abs(k - (kmax - dx)) < eps)[0][0]
+        """
+        fixed_weight_data = [ds.get_chi() for ds in fix_w_data]
         to_fit = [ds.get_chi() for ds in data_to_fit]
 
         k_models, dk_step = data_to_fit[-1].get_k(), data_to_fit[-1].k_step  # get k common for all models (ensure,
                                                                              # that all models have identical k )
 
         weights = self.create_weight_matrix(n_models=len(data_to_fit), max_w=1 - sum(w_fix))
-        # TODO: create Custom dict, that have
+
         weights_r_factor_dict = {}
         for w_set in weights:
-            mixed_chi = self.get_weighted_sum(fix_w_models=fix_w_data, fix_weights=w_fix, fit_models=to_fit,
+            mixed_chi = self.get_weighted_sum(fix_w_models=fixed_weight_data, fix_weights=w_fix, fit_models=to_fit,
                                               fit_weights=w_set)
             window = self.window_function(k_models)
-            mixed_chi = ((s02 * mixed_chi * k_models) ** kw) * window
+            mixed_chi = ((s02 * mixed_chi) * k_models ** kw) * window
             r_mod, ft_mod = self.calculate_fft(chi=mixed_chi, k_step=dk_step)
-            r_factor = self._calc_chi_squared(exp_data=ft_exp, model=ft_mod)
+            r_factor = self._calc_chi_squared(exp_data=ft_exp, model=ft_mod, min_r=min_r_idx, max_r=max_r_idx)
             weights_r_factor_dict[w_set] = r_factor
             # if len(weights_r_factor_dict) < 10:
             #     weights_r_factor_dict[w_set] = r_factor
             # else:
-            #     min_r = min(weights_r_factor_dict.keys(), key=weights_r_factor_dict.__getitem__)
-            #     if r_factor < weights_r_factor_dict[min_r]:
-            #         del weights_r_factor_dict[min_r]
+            #     min_key, min_r = sorted(weights_r_factor_dict.items(), key=lambda x: x[-1])[0]
+            #     if r_factor < min_r:
+            #         del weights_r_factor_dict[min_key]
             #         weights_r_factor_dict[w_set] = r_factor
-        for v in weights_r_factor_dict.values():
-            print(v)
+            #
+        for key, val in sorted(weights_r_factor_dict.items(), key=lambda x: x[1], reverse=True):
+            print(val, '=', key)
+        print('-'*10)
 
     @staticmethod
     def get_weighted_sum(fix_w_models, fix_weights, fit_models, fit_weights):
@@ -192,8 +206,8 @@ class XAFSModelMixerAPI:
         return _weights
 
     @staticmethod
-    def _calc_chi_squared(exp_data, model):
-        return np.sum((exp_data - model)**2)/np.sum(exp_data**2)
+    def _calc_chi_squared(exp_data, model, min_r, max_r):
+        return np.sum((exp_data[min_r:max_r] - model[min_r:max_r])**2)/np.sum(exp_data[min_r:max_r]**2)
 
     def delete_data_frame(self, frame: ModelDataFrame):
         self.data.remove(frame.dataset)
@@ -204,10 +218,10 @@ class XAFSModelMixerAPI:
     def import_file(self, invoker):
         filepath = filedialog.askopenfilename(
             filetypes=(
+                ("All files", "*.*"),
                 ("Chi file", "*.chi"),
                 ("Data file", "*.dat"),
                 ("Text file", "*.txt"),
-                ("All files", "*.*")
             )
         )
         if filepath:
@@ -314,8 +328,8 @@ class XAFSModelMixerAPI:
         out = []
         # Get necessary params from API entry fields
         k_shift = self.params_frame.k_shift_value.get()
-        s02     = self.params_frame.s02.get()
-        kw      = self.params_frame.kw_.get()
+        s02 = self.params_frame.s02.get()
+        kw = self.params_frame.kw_.get()
 
         if space == 'k':
             # TODO: add possibility to plot windowed data
@@ -341,7 +355,6 @@ class XAFSModelMixerAPI:
         else:
             print(f"Unknown space {space}")
 
-        # TODO: add fit plot to plotting data
         return out
 
 
