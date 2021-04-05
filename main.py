@@ -1,7 +1,6 @@
 import os
 import tkinter as tk
 import numpy as np
-import itertools as it
 from tkinter import (
     filedialog,
     simpledialog,
@@ -10,9 +9,11 @@ from utils.custom_frames import (
     PlotWindow,
     ParamsFrame,
     ExperimentalDataFrame,
-    ModelDataFrame
+    ModelDataFrame,
+    FittingFrame,
 )
 from utils.dataset import Dataset
+from utils.tools import calculate_fft
 
 
 class XAFSModelMixerAPI:
@@ -29,6 +30,9 @@ class XAFSModelMixerAPI:
         self.k_space_plot = PlotWindow(self, 'k')
         self.r_space_plot = PlotWindow(self, 'r')
 
+        self.k_space_fit_plot = PlotWindow(self, 'k')
+        self.r_space_fit_plot = PlotWindow(self, 'r')
+
         # Frames for global parameter (k-shift, s02, etc.) and plot buttons (k- and R-space
         self.params_frame = ParamsFrame(parent=self.master)
         self.params_frame.grid(row=0, rowspan=2, column=0, padx=10, pady=10, sticky='we')
@@ -37,7 +41,7 @@ class XAFSModelMixerAPI:
         self.plot_k_btn = tk.Button(
             self.master,
             text="Plot k-space",
-            command=self.k_space_plot.update_plot,
+            command=lambda: self.k_space_plot.update_plot(self.get_data_for_plot('k')),
             relief=tk.RAISED,
             width=25,
         )
@@ -59,7 +63,7 @@ class XAFSModelMixerAPI:
         self.plot_R_btn = tk.Button(
             self.master,
             text="Plot R-space",
-            command=self.r_space_plot.update_plot,
+            command=lambda: self.r_space_plot.update_plot(self.get_data_for_plot('r')),
             relief=tk.RAISED,
             width=25,
         )
@@ -89,20 +93,13 @@ class XAFSModelMixerAPI:
             relief=tk.RAISED,
             width=25,
         )
-        self.add_model_btn.grid(row=4, column=0, padx=5, pady=5, sticky='we')
+        self.add_model_btn.grid(row=4, column=0, padx=5, pady=5, sticky='wen')
 
-        self.fit_btn = tk.Button(
-            self.master,
-            text="Fit",
-            command=self.fit,
-            relief=tk.RAISED,
-            width=25,
-        )
-        self.fit_btn.grid(row=4, column=1, columnspan=3, padx=5, pady=5, sticky='s')
+        self.fit_frame = FittingFrame(gui=self)
+        self.fit_frame.grid(row=4, column=1, columnspan=3, padx=5, pady=5, sticky='enw')
 
         # last occupied row in main frame
         self.current_row = 4
-        self._plot_test = 1
 
     def set_axis_range(self, event):
         val = simpledialog.askfloat(title="Set axis range", prompt="Set axis value limit")
@@ -111,103 +108,6 @@ class XAFSModelMixerAPI:
             event.widget.delete(0, tk.END)
             event.widget.insert(0, val)
             event.widget.configure(state=tk.DISABLED)
-
-    def fit(self):
-        if self.experimental_data.dataset is None:
-            print("No experimental data for fitting procedure")
-            # TODO: popup warning
-            return False
-        if len(self.data) == 1:
-            print("No model data for fitting procedure")
-            return False
-
-        # get common params
-        k_shift = self.params_frame.k_shift_value.get()
-        kw = self.params_frame.kw_.get()
-        s02 = self.params_frame.s02.get()
-        min_r = self.x_min_r.get()
-        max_r = self.x_max_r.get()
-
-        fix_w_data = []
-        data_to_fit = []
-        w_fix = []
-
-        for ds in self.data:
-            if ds.is_experimental:
-                k, chi = ds.get_k_chi(kw=kw, s02=1., k_shift=k_shift)
-                window = self.window_function(k)
-                chi = chi * window
-                r_exp, ft_exp = self.calculate_fft(chi=chi, k_step=ds.k_step)
-            else:
-                if ds.fix_mix_w:
-                    w_fix.append(ds.fix_mix_w)
-                    fix_w_data.append(ds)
-                else:
-                    data_to_fit.append(ds)
-
-        min_r_idx = np.where(r_exp > min_r)[0][0]
-        max_r_idx = np.where(r_exp > max_r)[0][0]
-
-        """
-        kmin_ind = np.where(np.abs(k - kmin) < eps)[0][0]
-        kmin_ind1 = np.where(np.abs(k - (kmin + dx)) < eps)[0][0]
-        kmax_ind = np.where(np.abs(k - kmax) < eps)[0][0]
-        kmax_ind1 = np.where(np.abs(k - (kmax - dx)) < eps)[0][0]
-        """
-        fixed_weight_data = [ds.get_chi() for ds in fix_w_data]
-        to_fit = [ds.get_chi() for ds in data_to_fit]
-
-        k_models, dk_step = data_to_fit[-1].get_k(), data_to_fit[-1].k_step  # get k common for all models (ensure,
-                                                                             # that all models have identical k )
-
-        weights = self.create_weight_matrix(n_models=len(data_to_fit), max_w=1 - sum(w_fix))
-
-        weights_r_factor_dict = {}
-        for w_set in weights:
-            mixed_chi = self.get_weighted_sum(fix_w_models=fixed_weight_data, fix_weights=w_fix, fit_models=to_fit,
-                                              fit_weights=w_set)
-            window = self.window_function(k_models)
-            mixed_chi = ((s02 * mixed_chi) * k_models ** kw) * window
-            r_mod, ft_mod = self.calculate_fft(chi=mixed_chi, k_step=dk_step)
-            r_factor = self._calc_chi_squared(exp_data=ft_exp, model=ft_mod, min_r=min_r_idx, max_r=max_r_idx)
-            weights_r_factor_dict[w_set] = r_factor
-            # if len(weights_r_factor_dict) < 10:
-            #     weights_r_factor_dict[w_set] = r_factor
-            # else:
-            #     min_key, min_r = sorted(weights_r_factor_dict.items(), key=lambda x: x[-1])[0]
-            #     if r_factor < min_r:
-            #         del weights_r_factor_dict[min_key]
-            #         weights_r_factor_dict[w_set] = r_factor
-            #
-        for key, val in sorted(weights_r_factor_dict.items(), key=lambda x: x[1], reverse=True):
-            print(val, '=', key)
-        print('-'*10)
-
-    @staticmethod
-    def get_weighted_sum(fix_w_models, fix_weights, fit_models, fit_weights):
-        w = list(fit_weights) + fix_weights
-        if fix_w_models:
-            mix_chi = (np.vstack([fix_w_models, fit_models]).T * w).T.sum(axis=0)
-        else:
-            mix_chi = (np.array(fit_models).T * w).T.sum(axis=0)
-        return mix_chi
-
-    @staticmethod
-    def create_weight_matrix(n_models: int, max_w: float):
-        _weights = []
-        step = 100
-        eps = 5 / (step * 10)
-        w = [i / step for i in range(int(max_w*step) + 1)]
-        prod = it.product(w, repeat=n_models)
-
-        for i in prod:
-            if max_w - eps <= sum(i) <= max_w + eps:
-                _weights.append(i)
-        return _weights
-
-    @staticmethod
-    def _calc_chi_squared(exp_data, model, min_r, max_r):
-        return np.sum((exp_data[min_r:max_r] - model[min_r:max_r])**2)/np.sum(exp_data[min_r:max_r]**2)
 
     def delete_data_frame(self, frame: ModelDataFrame):
         self.data.remove(frame.dataset)
@@ -302,28 +202,6 @@ class XAFSModelMixerAPI:
         k_wind[kmin_ind1 - win_shift:kmax_ind1 + win_shift] = max(init_window)
         return k_wind
 
-    @staticmethod
-    def calculate_fft(chi, k_step, n_samples: int = 2048):
-        """
-        Perform Fourier Transform with dataset
-        :param chi: chi-data - must be windowed already AND:
-            (1) weighted with s02 [if theoretical]
-            (2) k-shifted [if experimental]
-            (3) weighted [if for fitting and not experimental]
-        :param k_step: step size in k-space
-        :param n_samples:
-        :return: r and sqrt(Im^2 + Re^2)
-        """
-
-        rstep = np.pi / (k_step * n_samples)
-
-        ft_chi = np.fft.fft(chi, n=n_samples) * (k_step / np.sqrt(np.pi))
-
-        rmax_index = n_samples // 2
-        ft_mod = np.sqrt(ft_chi.real ** 2 + ft_chi.imag ** 2)
-        r = rstep * np.arange(rmax_index)
-        return r[:rmax_index], ft_mod[:rmax_index]
-
     def get_data_for_plot(self, space):
         out = []
         # Get necessary params from API entry fields
@@ -350,7 +228,7 @@ class XAFSModelMixerAPI:
                     k, chi = dataset.get_k_chi(kw=kw, s02=s02, k_shift=0)
                 window = self.window_function(k)
                 chi = chi * window
-                r, ft = self.calculate_fft(chi=chi, k_step=dataset.k_step)
+                r, ft = calculate_fft(chi=chi, k_step=dataset.k_step)
                 out.append([r, ft, attr_for_plot])
         else:
             print(f"Unknown space {space}")

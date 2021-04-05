@@ -2,8 +2,10 @@ import tkinter as tk
 from tkinter import (
     colorchooser,
     simpledialog,
+    messagebox,
 )
 import matplotlib.pyplot as plt
+import numpy as np
 from matplotlib.backends.backend_tkagg import (
     FigureCanvasTkAgg,
     NavigationToolbar2Tk,
@@ -11,6 +13,7 @@ from matplotlib.backends.backend_tkagg import (
 
 
 from utils.dataset import Dataset
+from utils.tools import calculate_fft, create_weight_matrix, get_weighted_sum, calc_chi_squared
 
 
 class ParamsFrame(tk.Frame):
@@ -199,7 +202,9 @@ class ModelDataFrame(BaseDataFrame):
 
         tk.Label(self, text="weight: ").grid(row=0, column=2, padx=5, pady=5, sticky='e')
         self.w = tk.DoubleVar(value=0.0)
-        self.weight = tk.Entry(self, width=7, textvariable=self.w)
+        self.weight = tk.Entry(self, width=7, textvariable=self.w, state=tk.DISABLED,
+                               # disabledbackground='white', disabledforeground='black'
+                               )
         self.weight.grid(row=0, column=3, padx=5, pady=5, stick='we')
 
         # self.hold_w_value = tk.BooleanVar()
@@ -231,7 +236,7 @@ class PlotWindow:
         self.canvas = None
         self.fig = None
 
-    def update_plot(self, *args):
+    def update_plot(self, dataset):
         # pp = self.parent.collect_params()
         if self.canvas is None:
             self.build_plot_window()
@@ -254,7 +259,7 @@ class PlotWindow:
             ax.set_ylabel(r'|FT($\chi$)|')
             ax.set_xlim(self.parent.x_min_r.get(), self.parent.x_max_r.get())
             ax.set_ylim(auto=True)
-        for ds in self.parent.get_data_for_plot(self.space):
+        for ds in dataset:
             x, y, attr = ds
             ax.plot(x, y, **attr)
 
@@ -263,3 +268,147 @@ class PlotWindow:
         ax.grid(True)
         self.canvas.draw()
 
+
+class FittingFrame(tk.Frame):
+
+    def __init__(self, gui):
+        super().__init__(gui.master)
+        self.gui = gui
+        self.fit_dataset = []
+        self.fix_dataset = []
+        self.data_r_space = {}
+        self.data_k_space = {}
+
+        # DD menu and label holders:
+        self.model_mix_window = None
+
+        self.fit_btn = tk.Button(
+            self,
+            text="Fit",
+            command=self.fit,
+            relief=tk.RAISED,
+            width=25,
+        )
+        self.fit_btn.grid(row=0, column=0, padx=5, pady=5, sticky='we')
+
+    def build_mix_dropdown_menu(self):
+        # self.destroy_fit_window()
+        self.model_mix_window = tk.Toplevel(self)
+        self.model_mix_window.title("Model mixing and Fitting results")
+        tk.Label(self.model_mix_window, text="R-factor and weights").grid(row=0, column=0, padx=5, pady=5,
+                                                                          sticky='wse')
+
+        self.model_mix_window.r_factor = tk.StringVar(self.model_mix_window)
+        choices = tuple([k for k in self.data_r_space.keys()])[1:]
+        self.model_mix_window.r_factor.set(choices[0])  # set the default option
+        self.model_mix_window.model_mix = tk.OptionMenu(self.model_mix_window, self.model_mix_window.r_factor, *choices)
+        self.model_mix_window.model_mix.grid(row=1, column=0, padx=5, pady=5, sticky="ew")
+        self.model_mix_window.model_mix.configure(width=50)
+        self.model_mix_window.r_factor.trace_add('write', self.plot_mix_vs_exp)
+        # TODO: invoke default plot here
+
+    def destroy_fit_window(self):
+        if self.model_mix_window is not None:
+            self.model_mix_window.destroy()
+            self.model_mix_window.update()
+        self.model_mix_window = None
+        self.fit_dataset = []
+        self.fix_dataset = []
+        self.data_r_space = {}
+        self.data_k_space = {}
+
+    def plot_mix_vs_exp(self, *args):
+
+        mix_key = self.model_mix_window.r_factor.get()
+        data_r = self.data_r_space['exp'], self.data_r_space[mix_key]
+        data_k = self.data_k_space['exp'], self.data_k_space[mix_key]
+
+        self.gui.k_space_fit_plot.update_plot(dataset=data_k)
+        self.gui.r_space_fit_plot.update_plot(dataset=data_r)
+
+    def fit(self):
+        if self.model_mix_window:
+            self.destroy_fit_window()
+        if self.gui.experimental_data.dataset is None:
+            messagebox.showwarning(
+                title="Experimental data not found",
+                message="Cannot execute fitting procedure - experimental dataset was not imported.",
+            )
+            return False
+
+        if len(self.gui.data) == 1:
+            messagebox.showwarning(
+                title="Lack of theoretical dataset(s)",
+                message="Cannot execute fitting procedure - any theoretical dataset was not add.",
+            )
+            return False
+        # TODO: add messagebox for only ine theoretical dataset (messagebox.askyesno(title=None, message=None))
+
+        # get common params
+        k_shift = self.gui.params_frame.k_shift_value.get()
+        kw = self.gui.params_frame.kw_.get()
+        s02 = self.gui.params_frame.s02.get()
+        min_r = self.gui.x_min_r.get()
+        max_r = self.gui.x_max_r.get()
+
+        w_fix = []
+
+        for ds in self.gui.data:
+            if ds.is_experimental:
+                k, chi = ds.get_k_chi(kw=kw, s02=1., k_shift=k_shift)
+                self.data_k_space['exp'] = (k, chi, {'label': ds.name, 'ls': ds.ls, 'lw': ds.lw, 'c': ds.color})
+                window = self.gui.window_function(k)
+                chi = chi * window
+                r_exp, ft_exp = calculate_fft(chi=chi, k_step=ds.k_step)
+                self.data_r_space['exp'] = (r_exp, ft_exp, {'label': ds.name, 'ls': ds.ls, 'lw': ds.lw, 'c': ds.color})
+
+            else:
+                if ds.fix_mix_w:
+                    w_fix.append(ds.fix_mix_w)
+                    self.fix_dataset.append(ds)
+                else:
+                    self.fit_dataset.append(ds)
+
+        min_r_idx = np.where(r_exp > min_r)[0][0]
+        max_r_idx = np.where(r_exp > max_r)[0][0]
+
+        fixed_weight_data = [ds.get_chi() for ds in self.fix_dataset]
+        to_fit = [ds.get_chi() for ds in self.fit_dataset]
+        # TODO: merge k for all models
+        k_models, dk_step = self.fit_dataset[-1].get_k(), self.fit_dataset[-1].k_step
+
+        weights = create_weight_matrix(n_models=len(self.fit_dataset), max_w=1 - sum(w_fix))
+
+        for w_set in weights:
+            mixed_chi = get_weighted_sum(fix_w_models=fixed_weight_data,
+                                         fix_weights=w_fix,
+                                         fit_models=to_fit,
+                                         fit_weights=w_set,
+                                         )
+            window = self.gui.window_function(k_models)
+            mixed_chi = ((s02 * mixed_chi) * k_models ** kw)
+
+            mixed_chi_windowed = mixed_chi * window
+
+            r_mod, ft_mod = calculate_fft(chi=mixed_chi_windowed, k_step=dk_step)
+            r_factor = calc_chi_squared(exp_data=ft_exp, model=ft_mod, min_r=min_r_idx, max_r=max_r_idx)
+
+            key = f"{r_factor}: " + "/".join([str(i) for i in w_set])
+
+            self.data_k_space[key] = (k_models, mixed_chi, {'label': 'Mix', 'lw': 2, 'c': 'r'})
+
+            self.data_r_space[key] = (r_mod, ft_mod, {'label': 'Mix', 'lw': 2, 'c': 'r'})
+        #     if len(weights_r_factor_dict) < 10:
+        #         weights_r_factor_dict[w_set] = r_factor
+        #     else:
+        #         min_key, min_r = sorted(weights_r_factor_dict.items(), key=lambda x: x[-1])[0]
+        #         if r_factor < min_r:
+        #             del weights_r_factor_dict[min_key]
+        #             weights_r_factor_dict[w_set] = r_factor
+        #
+        # for key, val in sorted(weights_r_factor_dict.items(), key=lambda x: x[1], reverse=True):
+        #     print(val, '=', key)
+        # print('-'*10)
+
+        self.build_mix_dropdown_menu()
+        return True
