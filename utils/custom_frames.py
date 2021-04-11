@@ -1,3 +1,4 @@
+import datetime
 import tkinter as tk
 from tkinter import (
     colorchooser,
@@ -13,8 +14,16 @@ from matplotlib.backends.backend_tkagg import (
 
 
 from utils.dataset import Dataset
-from utils.tools import calculate_fft, create_weight_matrix, get_weighted_sum, calc_chi_squared
-from utils.validators import check_r_factor_value, enable_entry_editing
+from utils.tools import (
+    calculate_fft,
+    create_weight_matrix,
+    get_weighted_sum,
+    calc_chi_squared,
+)
+from utils.validators import (
+    check_r_factor_value,
+    enable_entry_editing,
+)
 
 
 class ParamsFrame(tk.Frame):
@@ -301,6 +310,7 @@ class FittingFrame(tk.Frame):
         self.fix_dataset = []
         self.data_r_space = {}
         self.data_k_space = {}
+        self.weights = None
 
         # DD menu and label holders:
         self.model_mix_window = None
@@ -403,7 +413,7 @@ class FittingFrame(tk.Frame):
                 self.data_r_space['exp'] = (r_exp, ft_exp, {'label': ds.name, 'ls': ds.ls, 'lw': ds.lw, 'c': 'k'})
             else:
                 if ds.fix_mix_w:
-                    w_fix.append(ds.fix_mix_w)
+                    w_fix.append(ds.mix_w)
                     self.fix_dataset.append(ds)
                 else:
                     self.fit_dataset.append(ds)
@@ -416,9 +426,11 @@ class FittingFrame(tk.Frame):
         # TODO: merge k for all models
         k_models, dk_step = self.fit_dataset[-1].get_k(), self.fit_dataset[-1].k_step
 
-        weights = create_weight_matrix(n_models=len(self.fit_dataset), max_w=1 - sum(w_fix))
+        t = datetime.datetime.now()
+        if self.weights is None or len(self.weights[0]) != len(to_fit):
+            self.weights = create_weight_matrix(n_models=len(self.fit_dataset), max_w=1 - sum(w_fix))
 
-        for w_set in weights:
+        for w_set in self.weights:
             mixed_chi = get_weighted_sum(fix_w_models=fixed_weight_data,
                                          fix_weights=w_fix,
                                          fit_models=to_fit,
@@ -449,5 +461,5 @@ class FittingFrame(tk.Frame):
             label += f"{name}: {percent}\n"
 
         for ds in self.fix_dataset:
-            label += f"{ds.name}: {ds.fix_mix_w}\n"
+            label += f"{ds.name}: {ds.mix_w} (fix)\n"
         return label.strip()
