@@ -1,3 +1,4 @@
+import datetime
 import tkinter as tk
 from tkinter import (
     colorchooser,
@@ -13,7 +14,16 @@ from matplotlib.backends.backend_tkagg import (
 
 
 from utils.dataset import Dataset
-from utils.tools import calculate_fft, create_weight_matrix, get_weighted_sum, calc_chi_squared
+from utils.tools import (
+    calculate_fft,
+    create_weight_matrix,
+    get_weighted_sum,
+    calc_chi_squared,
+)
+from utils.validators import (
+    check_r_factor_value,
+    enable_entry_editing,
+)
 
 
 class ParamsFrame(tk.Frame):
@@ -178,7 +188,7 @@ class ModelDataFrame(BaseDataFrame):
 
         super().__init__(gui=gui)
         self.gui = gui
-        self.experimental = True
+        self.experimental = False
         self.dataset: Dataset = dataset
 
         # open data button
@@ -201,14 +211,36 @@ class ModelDataFrame(BaseDataFrame):
         ).grid(row=1, column=1, padx=5, pady=5, stick='we')
 
         tk.Label(self, text="weight: ").grid(row=0, column=2, padx=5, pady=5, sticky='e')
-        self.w = tk.DoubleVar(value=0.0)
-        self.weight = tk.Entry(self, width=7, textvariable=self.w, state=tk.DISABLED,
-                               # disabledbackground='white', disabledforeground='black'
-                               )
-        self.weight.grid(row=0, column=3, padx=5, pady=5, stick='we')
+        self.weight = tk.DoubleVar(value=0.0)
+        # self.weight.trace("w", self.set_model_weight_to_dataset)
+        self.weight_entry = tk.Entry(self, width=7, textvariable=self.weight, state=tk.DISABLED)
+        self.weight_entry.grid(row=0, column=3, padx=5, pady=5, stick='we')
+        self.weight_entry.bind('<Return>', self.set_model_weight_to_dataset)
+        self.weight_entry.bind('<FocusOut>', self.set_model_weight_to_dataset)
 
-        # self.hold_w_value = tk.BooleanVar()
-        # tk.Checkbutton(self, text="Freeze weight", variable=self.hold_w_value).grid(row=0, column=4, stick='sn')
+        self.hold_w = tk.BooleanVar(value=False)
+        tk.Checkbutton(self, text="Hold weight", variable=self.hold_w).grid(row=0, columnspan=2, column=4, stick='sn')
+        self.hold_w.trace("w", self.set_model_weight_in_widget)
+
+    def set_model_weight_in_widget(self, *args):
+        if self.hold_w.get():
+            self.weight_entry.config(state='normal')
+            self.dataset.fix_mix_w = True
+        else:
+            self.weight.set(0.0)
+            self.weight_entry.config(state='disabled')
+            self.dataset.fix_mix_w = False
+
+    def set_model_weight_to_dataset(self, *args):
+        try:
+            val = float(self.weight_entry.get())
+            if 1. > val > 0.:
+                self.weight.set(val)
+            else:
+                self.weight.set(0.0)
+        except ValueError:
+            self.weight.set(0.0)
+        self.dataset.mix_w = self.weight.get()
 
 
 class PlotWindow:
@@ -278,6 +310,7 @@ class FittingFrame(tk.Frame):
         self.fix_dataset = []
         self.data_r_space = {}
         self.data_k_space = {}
+        self.weights = None
 
         # DD menu and label holders:
         self.model_mix_window = None
@@ -289,33 +322,51 @@ class FittingFrame(tk.Frame):
             relief=tk.RAISED,
             width=25,
         )
-        self.fit_btn.grid(row=0, column=0, padx=5, pady=5, sticky='we')
+        self.fit_btn.grid(row=0, column=0, columnspan=2, padx=5, pady=5, sticky='we')
+
+        tk.Label(self, text="R-factor threshold:").grid(row=1, column=0, padx=5, pady=5, sticky='we')
+        self.r_factor_th = tk.DoubleVar(value=.02)
+        self.threshold = tk.Entry(self, textvariable=self.r_factor_th, width=7,
+                                  state = tk.DISABLED, disabledbackground = 'white',
+                                  disabledforeground = 'black'
+                                    )
+        self.threshold.grid(row=1, column=1, padx=5, pady=5, sticky='w')
+        self.threshold.bind('<Return>', check_r_factor_value)
+        self.threshold.bind('<FocusOut>', check_r_factor_value)
+        self.threshold.bind('<Double-Button-1>', enable_entry_editing)
 
     def build_mix_dropdown_menu(self):
-        # self.destroy_fit_window()
-        self.model_mix_window = tk.Toplevel(self)
-        self.model_mix_window.title("Model mixing and Fitting results")
-        tk.Label(self.model_mix_window, text="R-factor and weights").grid(row=0, column=0, padx=5, pady=5,
-                                                                          sticky='wse')
+        if len(self.data_r_space) > 1:
+            self.model_mix_window = tk.Toplevel(self)
+            self.model_mix_window.title("Model mixing and Fitting results")
+            tk.Label(self.model_mix_window, text="R-factor and weights").grid(row=0, column=0, padx=5, pady=5,
+                                                                              sticky='wse')
 
-        self.model_mix_window.r_factor = tk.StringVar(self.model_mix_window)
-        choices = tuple([k for k in self.data_r_space.keys()])[1:]
-        self.model_mix_window.r_factor.set(choices[0])  # set the default option
-        self.model_mix_window.model_mix = tk.OptionMenu(self.model_mix_window, self.model_mix_window.r_factor, *choices)
-        self.model_mix_window.model_mix.grid(row=1, column=0, padx=5, pady=5, sticky="ew")
-        self.model_mix_window.model_mix.configure(width=50)
-        self.model_mix_window.r_factor.trace_add('write', self.plot_mix_vs_exp)
-        # TODO: invoke default plot here
+            self.model_mix_window.r_factor = tk.StringVar(self.model_mix_window)
+            choices = tuple(sorted([k for k in self.data_r_space.keys()][1:]))
+            self.model_mix_window.r_factor.trace_add('write', self.plot_mix_vs_exp)
+            self.model_mix_window.r_factor.set(choices[0])  # set the default option
+            self.model_mix_window.model_mix = tk.OptionMenu(self.model_mix_window, self.model_mix_window.r_factor, *choices)
+            self.model_mix_window.model_mix.grid(row=1, column=0, padx=5, pady=5, sticky="ew")
+            self.model_mix_window.model_mix.configure(width=50)
+
+            self.model_mix_window.protocol("WM_DELETE_WINDOW", self.destroy_fit_window)
+        else:
+            messagebox.showwarning(
+                title="No satisfying R-factor",
+                message="Any weighted mix doe not provide low R-factor",
+            )
+            self.destroy_fit_window()
 
     def destroy_fit_window(self):
         if self.model_mix_window is not None:
             self.model_mix_window.destroy()
             self.model_mix_window.update()
-        self.model_mix_window = None
-        self.fit_dataset = []
-        self.fix_dataset = []
-        self.data_r_space = {}
-        self.data_k_space = {}
+            self.model_mix_window = None
+        self.fit_dataset.clear()
+        self.fix_dataset.clear()
+        self.data_r_space.clear()
+        self.data_k_space.clear()
 
     def plot_mix_vs_exp(self, *args):
 
@@ -327,8 +378,7 @@ class FittingFrame(tk.Frame):
         self.gui.r_space_fit_plot.update_plot(dataset=data_r)
 
     def fit(self):
-        if self.model_mix_window:
-            self.destroy_fit_window()
+        self.destroy_fit_window()
         if self.gui.experimental_data.dataset is None:
             messagebox.showwarning(
                 title="Experimental data not found",
@@ -356,15 +406,14 @@ class FittingFrame(tk.Frame):
         for ds in self.gui.data:
             if ds.is_experimental:
                 k, chi = ds.get_k_chi(kw=kw, s02=1., k_shift=k_shift)
-                self.data_k_space['exp'] = (k, chi, {'label': ds.name, 'ls': ds.ls, 'lw': ds.lw, 'c': ds.color})
+                self.data_k_space['exp'] = (k, chi, {'label': ds.name, 'ls': ds.ls, 'lw': ds.lw, 'c': 'k'})
                 window = self.gui.window_function(k)
                 chi = chi * window
                 r_exp, ft_exp = calculate_fft(chi=chi, k_step=ds.k_step)
-                self.data_r_space['exp'] = (r_exp, ft_exp, {'label': ds.name, 'ls': ds.ls, 'lw': ds.lw, 'c': ds.color})
-
+                self.data_r_space['exp'] = (r_exp, ft_exp, {'label': ds.name, 'ls': ds.ls, 'lw': ds.lw, 'c': 'k'})
             else:
                 if ds.fix_mix_w:
-                    w_fix.append(ds.fix_mix_w)
+                    w_fix.append(ds.mix_w)
                     self.fix_dataset.append(ds)
                 else:
                     self.fit_dataset.append(ds)
@@ -377,9 +426,11 @@ class FittingFrame(tk.Frame):
         # TODO: merge k for all models
         k_models, dk_step = self.fit_dataset[-1].get_k(), self.fit_dataset[-1].k_step
 
-        weights = create_weight_matrix(n_models=len(self.fit_dataset), max_w=1 - sum(w_fix))
+        t = datetime.datetime.now()
+        if self.weights is None or len(self.weights[0]) != len(to_fit):
+            self.weights = create_weight_matrix(n_models=len(self.fit_dataset), max_w=1 - sum(w_fix))
 
-        for w_set in weights:
+        for w_set in self.weights:
             mixed_chi = get_weighted_sum(fix_w_models=fixed_weight_data,
                                          fix_weights=w_fix,
                                          fit_models=to_fit,
@@ -393,22 +444,22 @@ class FittingFrame(tk.Frame):
             r_mod, ft_mod = calculate_fft(chi=mixed_chi_windowed, k_step=dk_step)
             r_factor = calc_chi_squared(exp_data=ft_exp, model=ft_mod, min_r=min_r_idx, max_r=max_r_idx)
 
-            key = f"{r_factor}: " + "/".join([str(i) for i in w_set])
-
-            self.data_k_space[key] = (k_models, mixed_chi, {'label': 'Mix', 'lw': 2, 'c': 'r'})
-
-            self.data_r_space[key] = (r_mod, ft_mod, {'label': 'Mix', 'lw': 2, 'c': 'r'})
-        #     if len(weights_r_factor_dict) < 10:
-        #         weights_r_factor_dict[w_set] = r_factor
-        #     else:
-        #         min_key, min_r = sorted(weights_r_factor_dict.items(), key=lambda x: x[-1])[0]
-        #         if r_factor < min_r:
-        #             del weights_r_factor_dict[min_key]
-        #             weights_r_factor_dict[w_set] = r_factor
-        #
-        # for key, val in sorted(weights_r_factor_dict.items(), key=lambda x: x[1], reverse=True):
-        #     print(val, '=', key)
-        # print('-'*10)
+            if r_factor <= self.r_factor_th.get():
+                label = self.build_label(w_set, r_factor)
+                attr_dict = {'label': label, 'lw': 2, 'c': 'r', 'marker': 'o', 'markersize': 9, 'mfc': 'none'}
+                key = f"{r_factor:.5f}: " + " ".join([str(i) for i in w_set])
+                self.data_k_space[key] = (k_models, mixed_chi, attr_dict)
+                self.data_r_space[key] = (r_mod, ft_mod, attr_dict)
 
         self.build_mix_dropdown_menu()
-        return True
+        # return True
+
+    def build_label(self, weights, r_factor):
+        label = f"R-factor: {r_factor:.5f}\n"
+        names = [ds.name for ds in self.fit_dataset]
+        for name, percent in zip(names, weights):
+            label += f"{name}: {percent}\n"
+
+        for ds in self.fix_dataset:
+            label += f"{ds.name}: {ds.mix_w} (fix)\n"
+        return label.strip()

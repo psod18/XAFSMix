@@ -48,16 +48,16 @@ class XAFSModelMixerAPI:
         self.plot_k_btn.grid(row=0, column=1, columnspan=3, padx=5, pady=5)
 
         self.x_min_k = tk.DoubleVar(value=0)
-        self.xmin_k = tk.Entry(self.master, width=7, textvariable=self.x_min_k, state=tk.DISABLED,
+        self.xmin_k = tk.Entry(self.master, width=5, textvariable=self.x_min_k, state=tk.DISABLED,
                                disabledbackground='white', disabledforeground='black')
-        self.xmin_k.grid(row=1, column=1, padx=5, pady=5, sticky='we')
+        self.xmin_k.grid(row=1, column=1, padx=5, pady=5, sticky='e')
         self.xmin_k.bind('<Double-Button-1>', self.set_axis_range)
 
         tk.Label(self.master, text=': min - max :').grid(row=1, column=2, padx=5, pady=5, sticky='we')
         self.x_max_k = tk.DoubleVar(value=20.0)
-        self.xmax_k = tk.Entry(self.master, width=7, textvariable=self.x_max_k, state=tk.DISABLED,
+        self.xmax_k = tk.Entry(self.master, width=5, textvariable=self.x_max_k, state=tk.DISABLED,
                                disabledbackground='white', disabledforeground='black')
-        self.xmax_k.grid(row=1, column=3, padx=5, pady=5, sticky='we')
+        self.xmax_k.grid(row=1, column=3, padx=5, pady=5, sticky='w')
         self.xmax_k.bind('<Double-Button-1>', self.set_axis_range)
 
         self.plot_R_btn = tk.Button(
@@ -70,16 +70,16 @@ class XAFSModelMixerAPI:
         self.plot_R_btn.grid(row=2, column=1, columnspan=3, padx=5, pady=5)
 
         self.x_min_r = tk.DoubleVar(value=1.0)
-        self.xmin_r = tk.Entry(self.master, width=7, textvariable=self.x_min_r, state=tk.DISABLED,
+        self.xmin_r = tk.Entry(self.master, width=5, textvariable=self.x_min_r, state=tk.DISABLED,
                                disabledbackground='white', disabledforeground='black')
-        self.xmin_r.grid(row=3, column=1, padx=5, pady=5, sticky='we')
+        self.xmin_r.grid(row=3, column=1, padx=5, pady=5, sticky='e')
         self.xmin_r.bind('<Double-Button-1>', self.set_axis_range)
 
         tk.Label(self.master, text=': min - max :').grid(row=3, column=2, padx=5, pady=5, sticky='we')
         self.x_max_r = tk.DoubleVar(value=6.0)
-        self.xmax_r = tk.Entry(self.master, width=7, textvariable=self.x_max_r, state=tk.DISABLED,
+        self.xmax_r = tk.Entry(self.master, width=5, textvariable=self.x_max_r, state=tk.DISABLED,
                                disabledbackground='white', disabledforeground='black')
-        self.xmax_r.grid(row=3, column=3, padx=5, pady=5, sticky='we')
+        self.xmax_r.grid(row=3, column=3, padx=5, pady=5, sticky='w')
         self.xmax_r.bind('<Double-Button-1>', self.set_axis_range)
 
         # experimental frame
@@ -93,13 +93,13 @@ class XAFSModelMixerAPI:
             relief=tk.RAISED,
             width=25,
         )
-        self.add_model_btn.grid(row=4, column=0, padx=5, pady=5, sticky='wen')
+        self.add_model_btn.grid(row=4, column=0, rowspan=2, padx=5, pady=5, sticky='we')
 
         self.fit_frame = FittingFrame(gui=self)
-        self.fit_frame.grid(row=4, column=1, columnspan=3, padx=5, pady=5, sticky='enw')
+        self.fit_frame.grid(row=4, rowspan=2, column=1, columnspan=3, padx=5, pady=5, sticky='enw')
 
         # last occupied row in main frame
-        self.current_row = 4
+        self.current_row = 5
 
     def set_axis_range(self, event):
         val = simpledialog.askfloat(title="Set axis range", prompt="Set axis value limit")
@@ -113,7 +113,7 @@ class XAFSModelMixerAPI:
         self.data.remove(frame.dataset)
         frame.grid_forget()
         frame.destroy()
-        self.current_row -= 1
+        # self.current_row -= 1
 
     def import_file(self, invoker):
         filepath = filedialog.askopenfilename(
@@ -127,8 +127,14 @@ class XAFSModelMixerAPI:
         if filepath:
             dataset = Dataset(filepath)
             if invoker.dataset is not None:
-                self.data.remove(invoker.dataset)
-            self.data.append(dataset)
+                idx = self.data.index(invoker.dataset)
+                # self.data.remove(invoker.dataset)
+                dataset.lw = invoker.line_width.get()
+                dataset.color = invoker.color.cget('bg')
+                invoker.dataset.is_experimental = invoker.experimental
+                self.data[idx] = dataset
+            else:
+                self.data.append(dataset)
             invoker.dataset = dataset
             invoker.dataset.is_experimental = invoker.experimental
             invoker.line_width.set(dataset.lw)
