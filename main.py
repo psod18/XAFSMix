@@ -47,14 +47,14 @@ class XAFSModelMixerAPI:
         )
         self.plot_k_btn.grid(row=0, column=1, columnspan=3, padx=5, pady=5)
 
-        self.x_min_k = tk.DoubleVar(value=0)
+        self.x_min_k = tk.DoubleVar(value=2.5)
         self.xmin_k = tk.Entry(self.master, width=5, textvariable=self.x_min_k, state=tk.DISABLED,
                                disabledbackground='white', disabledforeground='black')
         self.xmin_k.grid(row=1, column=1, padx=5, pady=5, sticky='e')
         self.xmin_k.bind('<Double-Button-1>', self.set_axis_range)
 
         tk.Label(self.master, text=': min - max :').grid(row=1, column=2, padx=5, pady=5, sticky='we')
-        self.x_max_k = tk.DoubleVar(value=20.0)
+        self.x_max_k = tk.DoubleVar(value=16.0)
         self.xmax_k = tk.Entry(self.master, width=5, textvariable=self.x_max_k, state=tk.DISABLED,
                                disabledbackground='white', disabledforeground='black')
         self.xmax_k.grid(row=1, column=3, padx=5, pady=5, sticky='w')
@@ -171,13 +171,12 @@ class XAFSModelMixerAPI:
         kmin = self.params_frame.k_min.get()
         kmax = self.params_frame.k_max.get()
         window = self.params_frame.wind.get()
-        eps = 0.01
 
         # get indices of k-values for allocation window function borders
-        kmin_ind = np.where(np.abs(k - kmin) < eps)[0][0]
-        kmin_ind1 = np.where(np.abs(k - (kmin + dx)) < eps)[0][0]
-        kmax_ind = np.where(np.abs(k - kmax) < eps)[0][0]
-        kmax_ind1 = np.where(np.abs(k - (kmax - dx)) < eps)[0][0]
+        kmin_ind = np.where(k < kmin)[0][-1]
+        kmin_ind1 = np.where(k < (kmin + dx))[0][-1]
+        kmax_ind = np.where(k > kmax)[0][0]
+        kmax_ind1 = np.where(k > (kmax - dx))[0][0]
 
         # build window (_/-\_ -> _/|\_ -> _/----\_)
         windows_length = len(k[kmin_ind:kmin_ind1 + 1])
@@ -201,7 +200,7 @@ class XAFSModelMixerAPI:
         dx1 = [init_window[0:max2]][0]
         dx2 = [init_window[max2:]][0]
 
-        win_shift = int(len(dx1) / 2)
+        win_shift = len(dx1) // 2
 
         k_wind[kmin_ind - win_shift:kmin_ind1 - win_shift + 1] = dx1
         k_wind[kmax_ind1 + win_shift:kmax_ind + win_shift + 1] = dx2
