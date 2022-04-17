@@ -1,5 +1,6 @@
 import numpy as np
-import itertools as it
+
+from utils.product import coefficient_combiner
 
 
 def calculate_fft(chi, k_step, n_samples: int = 2048):
@@ -30,14 +31,8 @@ def calc_chi_squared(exp_data, model, min_r, max_r):
 
 def create_weight_matrix(n_models: int, max_w: float):
     _weights = []
-    step = 100
-    eps = 5 / (step * 10)
-    w = [i / step for i in range(int(max_w*step) + 1)]
-    prod = it.product(w, repeat=n_models)
-
-    for i in prod:
-        if max_w - eps <= sum(i) <= max_w + eps:
-            _weights.append(i)
+    for w in coefficient_combiner(n_models, max_w, weight_step=0.01):
+        _weights.append(w)
     return _weights
 
 
@@ -48,4 +43,3 @@ def get_weighted_sum(fix_w_models, fix_weights, fit_models, fit_weights):
     else:
         mix_chi = (np.array(fit_models).T * w).T.sum(axis=0)
     return mix_chi
-
