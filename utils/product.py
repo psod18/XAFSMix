@@ -46,8 +46,6 @@ class DigitWheel:
 
 def coefficient_combiner(models_num: int, max_weight: float = 1.0, weight_step: float = 0.01):
 
-    fpp = len(str(int(1//weight_step)))
-
     if models_num < 1:
         raise BadInitialValue("Number of models must be > 0")
 
@@ -63,8 +61,8 @@ def coefficient_combiner(models_num: int, max_weight: float = 1.0, weight_step: 
         padlock.append(wheel)
 
     while True:
-        current_weight = [round(p.value, fpp) for p in padlock]
-        if round(sum(current_weight), fpp) == round(max_weight, fpp):
+        current_weight = [round(p.value, 2) for p in padlock]
+        if round(sum(current_weight), 2) == round(max_weight, 2):
             yield current_weight
         try:
             padlock[-1].spin()

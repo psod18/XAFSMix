@@ -10,7 +10,7 @@ class Dataset:
         self._chi_row = chi_row
         self.is_experimental = experimental
         self._k, self._chi = self.read_data()
-        self.k_step = self._k[1] - self._k[0]
+        self.k_shift = 0.0
 
         # plotting stuff
         self.color = "#000000"
@@ -34,16 +34,16 @@ class Dataset:
         chi = data[:, self._chi_row]
         return k, chi
 
-    def get_k_chi(self, kw: int, s02: float, k_shift: float):
+    # def get_k_chi(self, kw: int, s02: float, k_shift: float):
+    def get_k_chi(self, kw: int, s02: float):
         """
         Return processed  k-value (apply k-shift): k = k + shift
         and chi-values (multiply chi by s02 coef. and by k power to kw, i.e. k-weight) chi = s02 * chi * k^kw
         :param kw: k-weight, exponent value
         :param s02: magnitude reduction factor
-        :param k_shift: shift in k-space
         :return: tuple of numpy arrays (k, chi)
         """
-        k = self._k + k_shift if self.is_experimental else self._k
+        k = self.get_k()
         chi = s02 * self._chi * k ** kw
         return k, chi
 
@@ -51,4 +51,4 @@ class Dataset:
         return self._chi
 
     def get_k(self):
-        return self._k
+        return self._k + self.k_shift

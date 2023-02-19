@@ -1,5 +1,8 @@
+from typing import List
+
 import numpy as np
 
+from utils.dataset import Dataset
 from utils.product import coefficient_combiner
 
 
@@ -29,17 +32,18 @@ def calc_chi_squared(exp_data, model, min_r, max_r):
     return np.sum((exp_data[min_r:max_r] - model[min_r:max_r])**2)/np.sum(exp_data[min_r:max_r]**2)
 
 
-def create_weight_matrix(n_models: int, max_w: float):
+def create_weight_matrix(n_models: int, max_w: float) -> np.array:
     _weights = []
     for w in coefficient_combiner(n_models, max_w, weight_step=0.01):
         _weights.append(w)
-    return _weights
+    return np.array(_weights)
 
 
-def get_weighted_sum(fix_w_models, fix_weights, fit_models, fit_weights):
-    w = list(fit_weights) + fix_weights
-    if fix_w_models:
-        mix_chi = (np.vstack([fix_w_models, fit_models]).T * w).T.sum(axis=0)
-    else:
-        mix_chi = (np.array(fit_models).T * w).T.sum(axis=0)
-    return mix_chi
+def adjust_spectra_over_k_range(models: List[Dataset]):
+    _k = np.vstack([m.get_k() for m in models])
+    _, init_idx = np.where(0.03 > np.abs(_k - _k[np.argmax(_k[:, 0]), 0]))
+    _, final_idx = np.where(0.03 > np.abs(_k - _k[np.argmin(_k[:, -1]), -1]))
+    k = _k[0, init_idx[0]:final_idx[0]+1]
+
+    chi = np.vstack([model.get_chi()[i:j+1] for model, i, j in zip(models, init_idx, final_idx)])
+    return chi, k

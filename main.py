@@ -143,6 +143,7 @@ class XAFSModelMixerAPI:
             else:
                 invoker.dataset.ls = invoker.line_style.get()
             invoker.name_value.set(os.path.splitext(os.path.basename(filepath))[0])
+            invoker.k_shift.set(.0)
 
     def add_model(self):
         filepath = filedialog.askopenfilename(
@@ -160,6 +161,7 @@ class XAFSModelMixerAPI:
             new_data_frame.grid(row=self.current_row+1, column=0, padx=5, pady=5, sticky='we')
             new_data_frame.line_width.set(dataset.lw)
             new_data_frame.name_value.set(dataset.name)
+            new_data_frame.k_shift.set(dataset.k_shift)
             new_data_frame.line_style_menu.config(state='normal')
             self.current_row += 1
 
@@ -210,7 +212,7 @@ class XAFSModelMixerAPI:
     def get_data_for_plot(self, space):
         out = []
         # Get necessary params from API entry fields
-        k_shift = self.params_frame.k_shift_value.get()
+        # k_shift = self.params_frame.k_shift_value.get()
         s02 = self.params_frame.s02.get()
         kw = self.params_frame.kw_.get()
 
@@ -219,21 +221,21 @@ class XAFSModelMixerAPI:
             for dataset in self.data:
                 attr_for_plot = {'label': dataset.name, 'ls': dataset.ls, 'lw': dataset.lw, 'c': dataset.color}
                 if dataset.is_experimental:
-                    k, chi = dataset.get_k_chi(kw=kw, s02=1., k_shift=k_shift)
+                    k, chi = dataset.get_k_chi(kw=kw, s02=1.)
                 else:
-                    k, chi = dataset.get_k_chi(kw=kw, s02=s02, k_shift=0)
+                    k, chi = dataset.get_k_chi(kw=kw, s02=s02)
                 out.append([k, chi, attr_for_plot])
 
         elif space == 'r':
             for dataset in self.data:
                 attr_for_plot = {'label': dataset.name, 'ls': dataset.ls, 'lw': dataset.lw, 'c': dataset.color}
                 if dataset.is_experimental:
-                    k, chi = dataset.get_k_chi(kw=kw, s02=1., k_shift=k_shift)
+                    k, chi = dataset.get_k_chi(kw=kw, s02=1.)
                 else:
-                    k, chi = dataset.get_k_chi(kw=kw, s02=s02, k_shift=0)
+                    k, chi = dataset.get_k_chi(kw=kw, s02=s02)
                 window = self.window_function(k)
                 chi = chi * window
-                r, ft = calculate_fft(chi=chi, k_step=dataset.k_step)
+                r, ft = calculate_fft(chi=chi, k_step=0.05)
                 out.append([r, ft, attr_for_plot])
         else:
             print(f"Unknown space {space}")

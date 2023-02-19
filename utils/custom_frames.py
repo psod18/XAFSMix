@@ -1,4 +1,3 @@
-import datetime
 import tkinter as tk
 from tkinter import (
     colorchooser,
@@ -17,7 +16,7 @@ from utils.dataset import Dataset
 from utils.tools import (
     calculate_fft,
     create_weight_matrix,
-    get_weighted_sum,
+    adjust_spectra_over_k_range,
     calc_chi_squared,
 )
 from utils.validators import (
@@ -29,12 +28,6 @@ from utils.validators import (
 class ParamsFrame(tk.Frame):
     def __init__(self, parent):
         super().__init__(parent, border=2, relief=tk.GROOVE)
-        tk.Label(self, text="k-shift: ").grid(row=0, column=0, padx=5, pady=5, sticky='e')
-        self.k_shift_value = tk.DoubleVar(value=0.0)
-        self.kshift = tk.Entry(self, width=7, textvariable=self.k_shift_value, state=tk.DISABLED,
-                               disabledbackground='white', disabledforeground='black')
-        self.kshift.grid(row=0, column=1, padx=5, pady=5)
-        self.kshift.bind('<Double-Button-1>', self.set_k_shift)
 
         # first row
         tk.Label(self, text="s02: ").grid(row=0, column=2, padx=5, pady=5, sticky='e')
@@ -75,12 +68,6 @@ class ParamsFrame(tk.Frame):
         self.kw_menu = tk.OptionMenu(self, self.kw_, *weights_)
         self.kw_menu.grid(row=1, column=5, padx=5, pady=5, sticky="ew")
         self.kw_menu.configure(width=10)
-
-    def set_k_shift(self, *args):
-        new_k_shift = simpledialog.askfloat(title="k-shift", prompt="Set value for data shift in k-space",
-                                            minvalue=-10, maxvalue=10)
-        if new_k_shift is not None:
-            self.k_shift_value.set(new_k_shift)
 
     def set_magnitude(self, *args):
         new_mag = simpledialog.askfloat(title="Magnitude coeff.", prompt="Set value for signal magnitude coefficient",
@@ -134,8 +121,16 @@ class BaseDataFrame(tk.Frame):
         self.line_style.trace_add('write', self.change_line_style)
 
         self.color = tk.Label(self, text="", bg='black', width=3)
-        self.color.grid(row=1, column=6, padx=5, pady=5, sticky='we')
+        self.color.grid(row=1, column=6, padx=5, pady=5, sticky='w')
         self.color.bind('<Double-Button-1>', self.change_color)
+
+        tk.Label(self, text="k-shift: ").grid(row=0, column=5, padx=5, pady=5, sticky='e')
+        self.k_shift = tk.DoubleVar(self)
+        self.k_shift_entry = tk.Entry(self, width=4, textvariable=self.k_shift, disabledbackground='white',
+                                      disabledforeground='black')
+        self.k_shift_entry.grid(row=0, column=6, padx=5, pady=5, stick='we')
+        self.k_shift_entry.config(state=tk.DISABLED)
+        self.k_shift_entry.bind('<Double-Button-1>', self.set_k_shift)
 
     def rename_dataset(self, *args):
         if self.dataset:
@@ -165,6 +160,15 @@ class BaseDataFrame(tk.Frame):
         if self.dataset:
             new_ls = self.line_style.get()
             self.dataset.ls = new_ls
+
+    def set_k_shift(self, *args):
+        if self.dataset:
+            new_k_shift = simpledialog.askfloat(title="k-shift", prompt="Set value for data shift in k-space",
+                                                minvalue=-10, maxvalue=10)
+            if new_k_shift is not None:
+                new_k_shift = round(0.05*round(new_k_shift / 0.05), 2)
+                self.k_shift.set(new_k_shift)  # allows dk = 0.05 step in k-space
+                self.dataset.k_shift = new_k_shift
 
 
 class ExperimentalDataFrame(BaseDataFrame):
@@ -213,34 +217,32 @@ class ModelDataFrame(BaseDataFrame):
         tk.Label(self, text="weight: ").grid(row=0, column=2, padx=5, pady=5, sticky='e')
         self.weight = tk.DoubleVar(value=0.0)
         # self.weight.trace("w", self.set_model_weight_to_dataset)
-        self.weight_entry = tk.Entry(self, width=7, textvariable=self.weight, state=tk.DISABLED)
+        self.weight_entry = tk.Entry(self, width=7, textvariable=self.weight, disabledbackground='white',
+                                     disabledforeground='black')
         self.weight_entry.grid(row=0, column=3, padx=5, pady=5, stick='we')
-        self.weight_entry.bind('<Return>', self.set_model_weight_to_dataset)
-        self.weight_entry.bind('<FocusOut>', self.set_model_weight_to_dataset)
+        self.weight_entry.config(state=tk.DISABLED)
+        self.weight_entry.bind('<Double-Button-1>', self.set_model_weight_to_dataset)
 
         self.hold_w = tk.BooleanVar(value=False)
-        tk.Checkbutton(self, text="Hold weight", variable=self.hold_w).grid(row=0, columnspan=2, column=4, stick='sn')
+        tk.Checkbutton(self, text="Hold", variable=self.hold_w).grid(row=0, column=4, stick='wn')
         self.hold_w.trace("w", self.set_model_weight_in_widget)
 
     def set_model_weight_in_widget(self, *args):
         if self.hold_w.get():
-            self.weight_entry.config(state='normal')
             self.dataset.fix_mix_w = True
         else:
             self.weight.set(0.0)
-            self.weight_entry.config(state='disabled')
             self.dataset.fix_mix_w = False
 
     def set_model_weight_to_dataset(self, *args):
-        try:
-            val = float(self.weight_entry.get())
-            if 1. > val > 0.:
-                self.weight.set(val)
+        if self.hold_w.get():
+            weight = simpledialog.askfloat(title="model weight coeff.", prompt="Set model weight coefficient",
+                                           minvalue=0.0, maxvalue=1.0)
+            if weight is not None:
+                self.weight.set(round(weight, 2))
             else:
                 self.weight.set(0.0)
-        except ValueError:
-            self.weight.set(0.0)
-        self.dataset.mix_w = self.weight.get()
+            self.dataset.mix_w = self.weight.get()
 
 
 class PlotWindow:
@@ -310,10 +312,11 @@ class FittingFrame(tk.Frame):
         self.fix_dataset = []
         self.data_r_space = {}
         self.data_k_space = {}
-        self.weights = None
 
         # DD menu and label holders:
         self.model_mix_window = None
+        self.weights = None
+        self.weights_fixed = []
 
         self.fit_btn = tk.Button(
             self,
@@ -326,10 +329,10 @@ class FittingFrame(tk.Frame):
 
         tk.Label(self, text="R-factor threshold:").grid(row=1, column=0, padx=5, pady=5, sticky='we')
         self.r_factor_th = tk.DoubleVar(value=.02)
-        self.threshold = tk.Entry(self, textvariable=self.r_factor_th, width=7,
-                                  state = tk.DISABLED, disabledbackground = 'white',
-                                  disabledforeground = 'black'
-                                    )
+        self.threshold = tk.Entry(
+            self, textvariable=self.r_factor_th, width=7, state=tk.DISABLED, disabledbackground='white',
+            disabledforeground='black'
+            )
         self.threshold.grid(row=1, column=1, padx=5, pady=5, sticky='w')
         self.threshold.bind('<Return>', check_r_factor_value)
         self.threshold.bind('<FocusOut>', check_r_factor_value)
@@ -346,7 +349,9 @@ class FittingFrame(tk.Frame):
             choices = tuple(sorted([k for k in self.data_r_space.keys()][1:]))
             self.model_mix_window.r_factor.trace_add('write', self.plot_mix_vs_exp)
             self.model_mix_window.r_factor.set(choices[0])  # set the default option
-            self.model_mix_window.model_mix = tk.OptionMenu(self.model_mix_window, self.model_mix_window.r_factor, *choices)
+            self.model_mix_window.model_mix = tk.OptionMenu(
+                self.model_mix_window, self.model_mix_window.r_factor, *choices
+            )
             self.model_mix_window.model_mix.grid(row=1, column=0, padx=5, pady=5, sticky="ew")
             self.model_mix_window.model_mix.configure(width=50)
 
@@ -392,74 +397,79 @@ class FittingFrame(tk.Frame):
                 message="Cannot execute fitting procedure - any theoretical dataset was not add.",
             )
             return False
-        # TODO: add messagebox for only ine theoretical dataset (messagebox.askyesno(title=None, message=None))
 
         # get common params
-        k_shift = self.gui.params_frame.k_shift_value.get()
         kw = self.gui.params_frame.kw_.get()
         s02 = self.gui.params_frame.s02.get()
-        min_r = self.gui.x_min_r.get()
-        max_r = self.gui.x_max_r.get()
+
+        k, chi = self.gui.experimental_data.dataset.get_k_chi(kw=kw, s02=1.)
+        self.data_k_space['exp'] = (
+            k, chi, {
+                'label': self.gui.experimental_data.dataset.name,
+                'ls': self.gui.experimental_data.dataset.ls,
+                'lw': self.gui.experimental_data.dataset.lw,
+                'c': 'k'}
+        )
+        window = self.gui.window_function(k)
+        chi = chi * window
+        r_exp, ft_exp = calculate_fft(chi=chi, k_step=0.05)
+        self.data_r_space['exp'] = (
+            r_exp, ft_exp, {
+                'label': self.gui.experimental_data.dataset.name,
+                'ls': self.gui.experimental_data.dataset.ls,
+                'lw': self.gui.experimental_data.dataset.lw,
+                'c': 'k'}
+        )
+
+        min_r = np.where(r_exp > self.gui.x_min_r.get())[0][0]
+        max_r = np.where(r_exp > self.gui.x_max_r.get())[0][0]
 
         w_fix = []
-
         for ds in self.gui.data:
             if ds.is_experimental:
-                k, chi = ds.get_k_chi(kw=kw, s02=1., k_shift=k_shift)
-                self.data_k_space['exp'] = (k, chi, {'label': ds.name, 'ls': ds.ls, 'lw': ds.lw, 'c': 'k'})
-                window = self.gui.window_function(k)
-                chi = chi * window
-                r_exp, ft_exp = calculate_fft(chi=chi, k_step=ds.k_step)
-                self.data_r_space['exp'] = (r_exp, ft_exp, {'label': ds.name, 'ls': ds.ls, 'lw': ds.lw, 'c': 'k'})
+                continue
+            if ds.fix_mix_w:
+                w_fix.append(ds.mix_w)
+                self.fix_dataset.append(ds)
             else:
-                if ds.fix_mix_w:
-                    w_fix.append(ds.mix_w)
-                    self.fix_dataset.append(ds)
-                else:
-                    self.fit_dataset.append(ds)
+                self.fit_dataset.append(ds)
 
-        min_r_idx = np.where(r_exp > min_r)[0][0]
-        max_r_idx = np.where(r_exp > max_r)[0][0]
-
-        fixed_weight_data = [ds.get_chi() for ds in self.fix_dataset]
-        to_fit = [ds.get_chi() for ds in self.fit_dataset]
-        # TODO: merge k for all models
-        k_models, dk_step = self.fit_dataset[-1].get_k(), self.fit_dataset[-1].k_step
-
-        t = datetime.datetime.now()
-        if self.weights is None or len(self.weights[0]) != len(to_fit):
+        # rebuild weights matrix if needed
+        if (self.weights is None or len(self.fit_dataset) != self.weights.shape[-1])\
+                or (sum(w_fix) != sum(self.weights_fixed)):
             self.weights = create_weight_matrix(n_models=len(self.fit_dataset), max_w=1 - sum(w_fix))
+            self.weights_fixed = w_fix
 
-        for w_set in self.weights:
-            mixed_chi = get_weighted_sum(fix_w_models=fixed_weight_data,
-                                         fix_weights=w_fix,
-                                         fit_models=to_fit,
-                                         fit_weights=w_set,
-                                         )
+        weights = np.c_[self.weights, np.tile(np.array(w_fix), (len(self.weights), 1))]
+
+        # prepare average chi and unified k-range:
+        chi_models, k_models = adjust_spectra_over_k_range(models=self.fit_dataset + self.fix_dataset)
+        curr_min_r_factor = 1.
+        for weight in weights:
+            mixed_chi = (chi_models*np.expand_dims(weight, axis=1)).sum(axis=0)
+
             window = self.gui.window_function(k_models)
-            mixed_chi = ((s02 * mixed_chi) * k_models ** kw)
+            mixed_chi = (s02 * mixed_chi * k_models ** kw)
 
             mixed_chi_windowed = mixed_chi * window
 
-            r_mod, ft_mod = calculate_fft(chi=mixed_chi_windowed, k_step=dk_step)
-            r_factor = calc_chi_squared(exp_data=ft_exp, model=ft_mod, min_r=min_r_idx, max_r=max_r_idx)
+            r_mod, ft_mod = calculate_fft(chi=mixed_chi_windowed, k_step=0.05)
+            min_r_factor = calc_chi_squared(exp_data=ft_exp, model=ft_mod, min_r=min_r, max_r=max_r)
 
-            if r_factor <= self.r_factor_th.get():
-                label = self.build_label(w_set, r_factor)
+            if min_r_factor < curr_min_r_factor: curr_min_r_factor = min_r_factor
+
+            if min_r_factor <= self.r_factor_th.get():
+                label = self.build_label(weight, min_r_factor)
                 attr_dict = {'label': label, 'lw': 2, 'c': 'r', 'marker': 'o', 'markersize': 9, 'mfc': 'none'}
-                key = f"{r_factor:.5f}: " + " ".join([str(i) for i in w_set])
+                key = f"{min_r_factor:.5f}: " + " ".join([str(i) for i in weight])
                 self.data_k_space[key] = (k_models, mixed_chi, attr_dict)
                 self.data_r_space[key] = (r_mod, ft_mod, attr_dict)
-
+        print(f"Min R-factor {curr_min_r_factor}")
         self.build_mix_dropdown_menu()
-        # return True
 
     def build_label(self, weights, r_factor):
         label = f"R-factor: {r_factor:.5f}\n"
-        names = [ds.name for ds in self.fit_dataset]
+        names = [ds.name for ds in self.fit_dataset+self.fix_dataset]
         for name, percent in zip(names, weights):
             label += f"{name}: {percent}\n"
-
-        for ds in self.fix_dataset:
-            label += f"{ds.name}: {ds.mix_w} (fix)\n"
         return label.strip()
